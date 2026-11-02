@@ -79,7 +79,7 @@ const KNOWN_KEYS = {
   '': ['profile', 'school', 'term', 'auth', 'targets', 'strategy', 'schedule', 'net', 'safety', 'notify'],
   term: ['xnm', 'xqm'],
   auth: ['entry', 'username', 'password', 'mode', 'pauseOnCaptcha', 'sessionFile'],
-  strategy: ['stopAfterSuccess', 'maxAttemptsPerTarget'],
+  strategy: ['stopAfterSuccess', 'maxAttemptsPerTarget', 'fullFallbackAfterSec'],
   schedule: ['startAt', 'prewarmSec', 'highFreqBeforeSec', 'highFreqIntervalMs', 'intervalMs', 'maxRunMinutes'],
   net: [
     'proxy', 'concurrency', 'connectTimeoutMs', 'readTimeoutMs', 'maxRetries',

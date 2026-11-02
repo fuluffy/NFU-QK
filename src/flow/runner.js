@@ -44,6 +44,9 @@ export class Runner {
     this.limiter = new SlidingWindowLimiter(this.safety.maxSubmitsPerMinute ?? 6, this.now);
     this.stopped = false;
     this.counters = { cycles: 0, netErrors: 0, sessionRelogins: 0, logThrottle: 0 };
+    /** 满员降级：目标 id → 首次发现满员的时间 / 已降级集合 */
+    this.fullSince = new Map();
+    this.demoted = new Set();
   }
 
   stop() {
@@ -157,11 +160,43 @@ export class Runner {
     return { outcome, cycles: this.counters.cycles, summary, counters: { ...this.counters } };
   }
 
+  /**
+   * 满员降级：某目标命中但持续满员超过 `strategy.fullFallbackAfterSec` 秒后，
+   * 给它加一个惩罚分排到备选之后，先去抢还有名额的目标。
+   *
+   * 语义是**单向**的：一旦降级就不再升回。否则 P0 放出名额的瞬间权重反超，
+   * 会和 P1 来回抖，实际两边都抢不到。想恢复只能重跑。
+   * 配置为 0（默认）= 关闭，保持旧行为：死等最高优先级。
+   */
+  applyDemotion(targets) {
+    if (!this.demoted.size) return targets;
+    return targets.map((t) =>
+      this.demoted.has(t.id) ? { ...t, priority: (Number.isFinite(t.priority) ? t.priority : 100) + 1000 } : t,
+    );
+  }
+
+  /** 记录一次"命中但满员"，必要时把该目标降级。返回是否刚刚降级。 */
+  noteFull(target, at) {
+    const sec = Number(this.strategy.fullFallbackAfterSec ?? 0);
+    if (!(sec > 0) || !target?.id || this.demoted.has(target.id)) return false;
+    const since = this.fullSince.get(target.id);
+    if (since === undefined) {
+      this.fullSince.set(target.id, at);
+      return false;
+    }
+    if (at - since < sec * 1000) return false;
+    this.demoted.add(target.id);
+    this.logger?.warn(
+      `「${target.courseName?.include?.join('/') ?? target.id}」已持续满员 ${((at - since) / 1000).toFixed(0)}s，降级为备选 —— 先去抢下一个目标`,
+    );
+    return true;
+  }
+
   /** 单次轮询 + 命中即提交。 */
   async cycle(ctx) {
     const active = this.store.activeTargets();
     if (!active.length) return { status: 'idle' };
-    ctx.__activeTargets = active;
+    ctx.__activeTargets = this.applyDemotion(active);
 
     const poll = await this.engine.poll(ctx);
 
@@ -171,11 +206,15 @@ export class Runner {
     }
 
     if (poll.status === 'found-full') {
+      this.noteFull(poll.match.target, this.now());
       this.logThrottled(
         `找到「${describe(poll.match)}」但当前已满员（${poll.count} 条课程），等待有人退课…`,
       );
       return poll;
     }
+
+    // 命中且（按引擎判定）可提交 —— 说明它不再满员，清掉满员计时
+    if (poll.match?.target?.id) this.fullSince.delete(poll.match.target.id);
 
     const { match } = poll;
     this.logger?.info(

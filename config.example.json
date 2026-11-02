@@ -52,7 +52,9 @@
   ],
   "strategy": {
     "stopAfterSuccess": true,
-    "maxAttemptsPerTarget": 0
+    "maxAttemptsPerTarget": 0,
+    "fullFallbackAfterSec": 0,
+    "_fullFallbackAfterSec_note": "某个目标命中但持续满员超过这么多秒，就把它降级为备选、先去抢下一个目标（单向，不回头）。0 = 关闭，死等最高优先级。"
   },
   "schedule": {
     "startAt": null,
