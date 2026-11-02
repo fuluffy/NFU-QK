@@ -67,8 +67,8 @@ for (const b of BUCKETS) {
       id,
       courseCode: { exact: codes },
       priority: i,
+      credits: c.credits,
       _name: c.name,
-      _credits: c.credits,
       _unit: c.unit,
     });
     ids.push(id);

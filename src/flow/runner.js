@@ -398,6 +398,11 @@ export class Runner {
 
       if (result.status === 'success') {
         const gained = this.creditsOf(r.match);
+        if (gained === 0) {
+          this.logger?.warn(
+            `「${tag}」抢到了但学分未知（列表无学分字段，目标里也没写 credits）—— 该类别进度无法累加，建议在目标里补 "credits"`,
+          );
+        }
         const total = (this.bucketCredits.get(bucket.id) ?? 0) + gained;
         this.bucketCredits.set(bucket.id, total);
         const done = total >= bucket.needCredits;

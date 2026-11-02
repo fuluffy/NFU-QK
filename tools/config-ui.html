@@ -268,7 +268,7 @@ function buildConfig(){
       const c = byCode.get(code) || {};
       const id = `${b.id}-${code}`;
       const codes = code.startsWith('C') ? [code, code.slice(1)] : [code];
-      targets.push({ id, courseCode:{ exact: codes }, priority: i, _name: c.name, _credits: c.credits });
+      targets.push({ id, courseCode:{ exact: codes }, priority: i, credits: c.credits, _name: c.name });
       ids.push(id);
     });
     buckets.push({ id:b.id, label:b.label, rule:b.rule, needCredits, targets:ids });
