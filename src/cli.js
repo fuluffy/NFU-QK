@@ -336,6 +336,11 @@ async function cmdRun(args) {
     return 2;
   }
 
+  if (profile._status && !String(profile._status).startsWith('VERIFIED')) {
+    logger.warn(`⚠️ profile 状态：${profile._status}`);
+    logger.warn('   它有依据，但没对当前学期验证过。实跑时盯住列表条数——若为 0 条，大概率是端点或字段已变。');
+  }
+
   // 会话：Phase 1 由浏览器登录产生；此处只做加载与校验
   const sessionFile = config.auth?.sessionFile ?? 'state/session.json';
   let jar = new CookieJar();

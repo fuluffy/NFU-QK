@@ -3,6 +3,11 @@
   "label": "公选课（通识选修）",
   "school": "NJFU",
   "_status": "ASSUMED —— 端点/字段名均为推断值，Phase 1 真机取证后必须逐项校正",
+  "_alternative": {
+    "profile": "ggxxk-xsxkkc",
+    "why": "2026-11-02 实测：本文件所用的 zzxk 系列端点全部返回「系统功能暂未开放」，而同晚 xsxkkc/comeInGgxxkxk 返回 200。学长项目（2025 春）也证明公选课走 xsxkkc 族。",
+    "policy": "本文件**保持原样不删**，作为「zzxk 才是对的」这一可能性保留；两条路线并存，由 --profile 选择。"
+  },
   "_notes": [
     "公选课走「网上选课（预选）」以及后续正选/补退选轮次，端点与体育课同属一套 zzxk 流水线，",
     "差异主要在 kklxdm（课程类别码）与选课轮次 xkkz_id。",

@@ -1,0 +1,125 @@
+{
+  "name": "ggxxk-xsxkkc",
+  "label": "公选课（通识选修）— xsxkkc 族",
+  "school": "NJFU",
+  "_status": "DERIVED —— 端点与字段来自 2025 春前人实测（NJFU-class-graber）及其真实响应样本，未经 2026-11 实测",
+  "_notes": [
+    "这是 ggxxk 的**第二条路线**，与 profiles/ggxxk.json（zzxk 族）并存，互不替代。",
+    "取舍理由：2026-11-02 实测 zzxk 系列端点全部返回「系统功能暂未开放」，而同一个晚修",
+    "xsxkkc/comeInGgxxkxk 返回 200（空壳）—— 说明模块族更可能是 xsxkkc，但未能完成验证。",
+    "字段与请求体依据：github.com/jvav-runtime-environment/NJFU-class-graber（样本学期 2024-2025-2）",
+    "详细对照见 docs/学长项目借鉴-2024.md。",
+    "与体育课的相似度：几乎同形。差别只在端点名（xsxkBxxk→xsxkGgxxkxk，bxxkOper→ggxxkxkOper）",
+    "与列表请求体（公选课用 kcxx 关键字 + 13 列 DataTables，无 kcid 查询参数）。",
+    "⚠️ 未验证项：① 是否需要先 GET /jsxsd/xsxk/xsxk_index?jx0502zbid=… 进入选课上下文",
+    "（前人代码注释称「不进入则查不了课程 id」）；② 提交时 kcid 走 query 还是 body（此 profile 两处都发）；",
+    "③ 2026 版是否已把该模块迁走。任何一项不符都会表现为空列表或 404，而不是静默错误。"
+  ],
+  "baseUrl": "https://jwxt.njfu.edu.cn",
+  "entryPath": "/jsxsd/xsxk/xklc_list",
+  "headers": {
+    "x-requested-with": "XMLHttpRequest",
+    "referer": "https://jwxt.njfu.edu.cn/jsxsd/xsxkkc/comeInGgxxkxk",
+    "origin": "https://jwxt.njfu.edu.cn",
+    "accept": "application/json, text/javascript, */*; q=0.01"
+  },
+  "matchFields": {
+    "name": "kcmc",
+    "code": "kch",
+    "teacher": "skls",
+    "jxbId": "jx0404id",
+    "capacity": "pkrs",
+    "enrolled": "xkrs",
+    "_extra": {
+      "syrs": "剩余名额（字符串，实测恒等于 pkrs - xkrs）",
+      "jx02id": "提交时的 kcid",
+      "xf": "学分（数字），配额判定用",
+      "szkcflmc": "通识类别，如「人文素养类」「绿色文明类」",
+      "tsTskflMc2": "课程单元，如「创新创业」「艺术审美（美学和艺术史论类）」",
+      "xkzt": "选课状态，'9' 表示已选中",
+      "ctsm": "⚠️ 公选课响应中不存在此字段（体育课有）；过滤器已不再依赖它"
+    }
+  },
+  "sessionExpired": {
+    "bodyMatches": "name=[\"']?username|统一身份认证|用户登录|请输入密码",
+    "urlMatches": "authserver/login"
+  },
+  "steps": [
+    {
+      "id": "list",
+      "label": "ggxxk/可选课程列表（xsxkkc 族）",
+      "method": "POST",
+      "path": "/jsxsd/xsxkkc/xsxkGgxxkxk",
+      "body": {
+        "kcxx": "",
+        "skls": "",
+        "skxq": "",
+        "endJc": "",
+        "skjc": "",
+        "sfym": false,
+        "sfct": false,
+        "szjylb": "",
+        "sfxx": false,
+        "skfs": "",
+        "sEcho": 1,
+        "iColumns": 13,
+        "sColumns": "",
+        "iDisplayStart": 0,
+        "iDisplayLength": 99,
+        "mDataProp_0": "kch",
+        "mDataProp_1": "kcmc",
+        "mDataProp_2": "xf",
+        "mDataProp_3": "skls",
+        "mDataProp_4": "sksj",
+        "mDataProp_5": "skdd",
+        "mDataProp_6": "xqmc",
+        "mDataProp_7": "xkrs",
+        "mDataProp_8": "syrs",
+        "mDataProp_9": "ctsm",
+        "mDataProp_10": "tsTskflMc",
+        "mDataProp_11": "tsTskflMc2",
+        "mDataProp_12": "czOper"
+      },
+      "extract": { "items": "$.aaData[*]" },
+      "filter": {
+        "all": [{ "path": "$.xkzt", "ne": "9" }]
+      }
+    },
+    {
+      "id": "submit",
+      "label": "ggxxk/提交选课",
+      "method": "POST",
+      "retry": "none",
+      "path": "/jsxsd/xsxkkc/ggxxkxkOper",
+      "query": {
+        "kcid": "${item.jx02id}"
+      },
+      "body": {
+        "jx0404id": "${item.jx0404id}",
+        "xkzy": "",
+        "trjf": "",
+        "kcid": "${item.jx02id}",
+        "cfbs": ""
+      },
+      "success": { "path": "$.success", "eq": true },
+      "conflictWhen": { "path": "$.message", "matches": "冲突" },
+      "messageFrom": "$.message"
+    },
+    {
+      "id": "verify",
+      "label": "ggxxk/已选课程列表（确认结果用）",
+      "_note": "服务端渲染的 HTML，引擎会直接查 jx0404id 是否出现。",
+      "method": "GET",
+      "path": "/jsxsd/xsxkjg/comeXkjglb",
+      "headers": {
+        "referer": "https://jwxt.njfu.edu.cn/jsxsd/xsxkjg/comeXkjglb",
+        "accept": "text/html,application/xhtml+xml"
+      }
+    }
+  ],
+  "_openQuestions": [
+    "是否需要进入选课上下文（xsxk_index?jx0502zbid=…）—— 引擎当前不支持 warmup 步骤，若要补需单独实现",
+    "提交参数 kcid/cfbs 的落位（query / body）—— profile 两处都发以图兼容",
+    "选修类别码 kklxdm 是否还存在 —— 公选课请求体里没有该参数，故本条不适用"
+  ]
+}

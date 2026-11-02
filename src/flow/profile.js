@@ -77,6 +77,9 @@ export function checkProfile(profile) {
 
   if (profile._status?.startsWith('ASSUMED')) {
     warnings.push('该 profile 仍标记为 ASSUMED（推断值），真机取证前请勿实跑');
+  } else if (profile._status && !profile._status.startsWith('VERIFIED')) {
+    // DERIVED / 其它中间态：有依据但没对当前学期验证过，必须让使用者看见
+    warnings.push(`该 profile 标记为「${profile._status}」—— 尚未对当前学期真机验证，字段可能已变`);
   }
 
   return { errors, warnings };

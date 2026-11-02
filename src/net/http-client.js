@@ -25,6 +25,17 @@ import { computeDelay, isRetryableStatus, isRetryableNetworkError } from './back
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
+/**
+ * 金智 CAS 的「登出入口」。
+ *
+ * 为什么必须拦住它：正方会在会话异常时把请求 302 到 `/authserver/logout`，
+ * 而 CAS 的登出是**单点登出** —— 客户端只要跟着发一次 GET，整个 SSO 会话就作废，
+ * 后面所有请求都会被弹回登录页。表现上像是"突然掉线"，实际是自己把门锁上了。
+ *
+ * 注意不能把 `/authserver/login` 也拦掉：那是正常的登录跳转。
+ */
+const LOGOUT_REDIRECT_RE = /\/authserver\/logout(?:[?#/]|$)|\/sso\/logout(?:[?#/]|$)|[?&]_eventId=logout/i;
+
 export class NetworkError extends Error {
   constructor(message, { code, url, kind, cause, retryable } = {}) {
     super(message);
@@ -246,6 +257,7 @@ export class HttpClient {
           bounceAllowed &&
           retryMode !== 'none' &&
           attempt === 0 &&
+          attempt < maxAttempts - 1 && // 没有下一次机会时不能 continue，否则会把已拿到的响应丢掉
           res.status < 400 &&
           this._isBounced(spec, res.url)
         ) {
@@ -401,6 +413,17 @@ export class HttpClient {
 
             const nextUrl = new URL(res.headers.location, u).toString();
             if (Array.isArray(spec._chain)) spec._chain.push({ status, from: u.toString(), to: nextUrl });
+
+            // 登出型跳转：跟过去就等于主动作废会话，宁可当场失败
+            if (LOGOUT_REDIRECT_RE.test(nextUrl)) {
+              reject(
+                new NetworkError(
+                  '服务端把请求重定向到登出入口，已拒绝跟随（跟随会触发 CAS 单点登出，作废当前会话）',
+                  { code: 'LOGOUT_REDIRECT', kind: 'logout-redirect', url: nextUrl, retryable: false },
+                ),
+              );
+              return;
+            }
             // 303 与 302 在登录跳转中应转为 GET；307/308 保持原方法
             const keepMethod = status === 307 || status === 308;
             const nextSpec = { ...spec, url: nextUrl, path: undefined };
