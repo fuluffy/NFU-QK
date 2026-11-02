@@ -687,6 +687,14 @@ const BUCKETS = [
 const BK = new Map(BUCKETS.map(b => [b.id, b]));
 const COLLAPSE_AT = 3;
 
+// 先把三个类别占好位再渲染：否则 bootstrap 一旦失败（服务没起来 / 接口 500），
+// renderBuckets 会读到 undefined 直接抛错，右栏变成一片空白 —— 比"报错"更难排查。
+for (const b of BUCKETS) {
+  S.chains[b.id] = [];
+  S.earned[b.id] = 0;
+  S.expanded[b.id] = false;
+}
+
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 const bucketOf = c => BUCKETS.find(b => b.accepts(c)) || null;
