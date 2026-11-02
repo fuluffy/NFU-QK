@@ -20,3 +20,6 @@ node_modules/
 .idea/
 Thumbs.db
 Desktop.ini
+
+# ── 工作区助手产物（记忆/会话），不入库 ──────────────────────
+.workbuddy/

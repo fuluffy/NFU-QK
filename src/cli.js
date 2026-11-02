@@ -197,7 +197,7 @@ async function cmdDoctor(args) {
   logger.info(`IPv4 优先：${args['no-ipv4-first'] ? '关闭' : '开启'}`);
   logger.info('出网连通性由 harness/系统决定；本程序不做外部探测，避免给学校服务器增加无谓负载。');
 
-  logger.info(bad === 0 ? '═══ 自检完成：可以进入 Phase 1 取证 ═══' : `═══ 自检发现 ${bad} 个问题 ═══`);
+  logger.info(bad === 0 ? '═══ 自检完成：一切就绪 ═══' : `═══ 自检发现 ${bad} 个问题 ═══`);
   return bad === 0 ? 0 : 1;
 }
 
