@@ -76,7 +76,7 @@ function resolveEnv(value) {
 // 历史原因，配置模板里出现过几个"只有设计、没有实现"的开关。它们不报错、不生效，
 // 只会让人误以为开了某个保险 —— 这是最坏的一类配置，必须在 doctor 里当面说清。
 const KNOWN_KEYS = {
-  '': ['profile', 'school', 'term', 'auth', 'targets', 'strategy', 'schedule', 'net', 'safety', 'notify'],
+  '': ['profile', 'school', 'term', 'auth', 'targets', 'buckets', 'strategy', 'schedule', 'net', 'safety', 'notify'],
   term: ['xnm', 'xqm'],
   auth: ['entry', 'username', 'password', 'mode', 'pauseOnCaptcha', 'sessionFile'],
   strategy: ['stopAfterSuccess', 'maxAttemptsPerTarget', 'fullFallbackAfterSec'],
@@ -89,7 +89,7 @@ const KNOWN_KEYS = {
   safety: ['dryRun', 'maxSubmitsPerMinute'],
 };
 
-const TARGET_KEYS = ['id', 'alias', 'priority', 'courseName', 'courseCode', 'teacher', 'jxbId'];
+const TARGET_KEYS = ['id', 'alias', 'priority', 'courseName', 'courseCode', 'teacher', 'jxbId', 'credits'];
 
 const UNIMPLEMENTED = new Map([
   ['strategy.nameMatchMode', '未接线 —— 要控制「任一命中 / 全部命中」，写在各维度里：targets[].courseName.mode = "any" | "all"'],
@@ -125,9 +125,63 @@ function auditConfig(config) {
   const targetKeys = new Set();
   for (const t of config.targets ?? []) for (const k of Object.keys(t ?? {})) targetKeys.add(k);
   for (const k of targetKeys) {
+    if (k.startsWith('_')) continue; // _name / _credits 这类人看的注释
     if (!TARGET_KEYS.includes(k)) {
       issues.push(`targets[].${k} —— 未知目标字段（可用：${TARGET_KEYS.join(', ')}）`);
     }
+  }
+
+  issues.push(...auditBuckets(config));
+  return issues;
+}
+
+/**
+ * 分桶配置的体检。分桶最容易出错的地方是"桶里引用了不存在的目标 id"——
+ * 那种错误不会报错，只会让某个类别永远抢不到，而且日志里看不出来。
+ */
+function auditBuckets(config) {
+  const issues = [];
+  const buckets = config.buckets;
+  if (buckets === undefined) return issues;
+  if (!Array.isArray(buckets)) return ['buckets —— 必须是数组'];
+
+  const targetIds = new Set((config.targets ?? []).map((t) => t.id));
+  const seenBucket = new Set();
+  const usedTargets = new Map();
+
+  for (const [i, b] of buckets.entries()) {
+    if (!b || typeof b !== 'object') {
+      issues.push(`buckets[${i}] —— 不是对象`);
+      continue;
+    }
+    if (!b.id) issues.push(`buckets[${i}] —— 缺少 id`);
+    else if (seenBucket.has(b.id)) issues.push(`buckets[${i}] —— id 重复：${b.id}`);
+    else seenBucket.add(b.id);
+
+    if (!(Number(b.needCredits) > 0)) {
+      issues.push(`buckets[${i}]（${b.id ?? '未命名'}）—— needCredits 必须是正数`);
+    }
+    if (!Array.isArray(b.targets) || !b.targets.length) {
+      issues.push(`buckets[${i}]（${b.id ?? '未命名'}）—— targets 必须是非空数组`);
+      continue;
+    }
+    for (const id of b.targets) {
+      if (!targetIds.has(id)) {
+        issues.push(`buckets[${i}] 引用了不存在的目标：${id}`);
+        continue;
+      }
+      if (usedTargets.has(id)) {
+        issues.push(`目标 ${id} 同时属于两个桶（${usedTargets.get(id)} 与 ${b.id}）—— 请拆开`);
+      } else {
+        usedTargets.set(id, b.id);
+      }
+    }
+  }
+
+  // 配了桶却漏了目标，说明写配置时漏了一类，属于静默失败
+  const orphans = [...targetIds].filter((id) => !usedTargets.has(id));
+  if (orphans.length) {
+    issues.push(`以下目标没有归入任何桶，分桶模式下不会被抢：${orphans.join(', ')}`);
   }
   return issues;
 }
@@ -162,7 +216,7 @@ async function cmdDoctor(args) {
       const profile = await loadProfile(name);
       const { warnings } = checkProfile(profile);
       logger.info(`✔ ${name}（${profile.label ?? ''}）—— ${profile.steps.length} 个步骤`);
-      for (const w of warnings) logger.warn(`  ⚠ ${w}`);
+      for (const w of warnings) logger.warn(`  ⚠ [${name}] ${w}`);
     } catch (err) {
       bad += 1;
       logger.error(`✘ ${name}：${err.message}`);
@@ -174,7 +228,9 @@ async function cmdDoctor(args) {
     const { path: cfgPath, config } = await loadConfig(args.config);
     logger.info(`✔ 已加载 ${cfgPath}`);
     logger.info(`  profile=${config.profile}｜目标 ${config.targets?.length ?? 0} 个｜dryRun=${config.safety?.dryRun ?? true}`);
-    for (const t of config.targets ?? []) logger.info(`  · [P${t.priority ?? 100}] ${describeTarget(t)}`);
+    const allTargets = config.targets ?? [];
+    for (const t of allTargets.slice(0, 8)) logger.info(`  · [P${t.priority ?? 100}] ${describeTarget(t)}`);
+    if (allTargets.length > 8) logger.info(`  …另有 ${allTargets.length - 8} 个目标（分桶模式下按类别轮转，不按 priority 全局排序）`);
     if (config.auth?.username) {
       logger.info(`  账号：${maskUser(config.auth.username)}（密码${config.auth.password ? '已填' : '为空'}）`);
     } else {
@@ -411,6 +467,7 @@ async function cmdRun(args) {
     safety: config.safety ?? {},
     strategy: config.strategy ?? {},
     backoff: net.backoff,
+    buckets: config.buckets ?? [],
   });
 
   process.once('SIGINT', () => {

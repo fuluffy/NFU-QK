@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFU-QK 公选课配置器</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a21; --panel2:#1c212a; --line:#262c37;
+    --text:#e6e9ef; --dim:#9aa4b2; --accent:#4c8dff; --ok:#3ecf8e; --warn:#ffb020; --bad:#ff5c5c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  header{padding:20px 24px 12px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 6px;font-size:18px;font-weight:600}
+  .sub{color:var(--dim);font-size:12.5px}
+  .wrap{display:grid;grid-template-columns:minmax(320px,1fr) minmax(420px,1.15fr);gap:16px;padding:16px 24px 40px}
+  @media (max-width:1000px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .card h2{margin:0 0 4px;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  .rule{color:var(--dim);font-size:12px;margin-bottom:10px}
+  input[type=text],input[type=number],select{
+    background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:7px;padding:7px 10px;font:inherit;outline:none;width:100%}
+  input:focus,select:focus{border-color:var(--accent)}
+  .row{display:flex;gap:8px;align-items:center}
+  .pool{max-height:52vh;overflow:auto;margin-top:10px;border-top:1px solid var(--line)}
+  .course{padding:8px 2px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+  .course .meta{flex:1;min-width:0}
+  .name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tags{color:var(--dim);font-size:11.5px;display:flex;gap:8px;flex-wrap:wrap}
+  .code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--dim)}
+  button{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:6px;padding:4px 9px;font:inherit;font-size:12px;cursor:pointer}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;padding:8px 16px;font-size:13px}
+  button.ghost{background:transparent}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  .bucket{margin-bottom:14px}
+  .bucket .head{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .need{font-size:12px;color:var(--dim)}
+  .need b{color:var(--text)}
+  .need-ok{color:var(--ok)}
+  .need-warn{color:var(--warn)}
+  .chain{margin-top:8px;border-top:1px dashed var(--line);padding-top:8px}
+  .item{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+  .idx{width:20px;color:var(--dim);font-size:11.5px;text-align:right;font-family:ui-monospace,monospace}
+  .empty{color:var(--dim);font-size:12px;padding:10px 0}
+  .toolbar{display:flex;gap:8px;margin-bottom:10px}
+  .stat{font-size:12px;color:var(--dim);margin-top:10px;line-height:1.8}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+  .footer{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);
+    padding:12px 24px;display:flex;gap:10px;align-items:center}
+  .chk{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--dim)}
+  .pill{font-size:11px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;
+    max-height:220px;overflow:auto;font-size:11.5px;margin:10px 0 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>NFU-QK 公选课配置器</h1>
+  <div class="sub">按类别凑学分 · 课程代码精确匹配 · 生成后保存到项目根目录，用 <code>node src/cli.js run --config config.ggxxk.json</code> 运行</div>
+</header>
+
+<div class="wrap">
+  <section class="card">
+    <h2>课程库 <span class="pill" id="poolCount"></span></h2>
+    <div class="rule" id="catalogNote"></div>
+    <div class="toolbar">
+      <input type="text" id="search" placeholder="搜索课程名 / 代码 / 类别 / 单元 / 开课单位">
+    </div>
+    <div class="row" style="margin-bottom:8px">
+      <select id="catFilter"></select>
+    </div>
+    <div class="pool" id="pool"></div>
+  </section>
+
+  <section class="card">
+    <h2>我需要的类别</h2>
+    <div class="rule">目标学分达到后，该类别自动停止；同一类别内按顺序尝试，前一门满员就换下一门。</div>
+    <div id="buckets"></div>
+    <div class="stat" id="stat"></div>
+    <pre id="preview" style="display:none"></pre>
+  </section>
+</div>
+
+<div class="footer">
+  <label class="chk"><input type="checkbox" id="dry" checked> 干跑（不做真实提交）</label>
+  <label class="chk">开抢时间 <input type="text" id="startAt" style="width:210px" value="2026-11-03T12:30:00+08:00"></label>
+  <div style="flex:1"></div>
+  <button class="ghost" id="btnPreview">预览 JSON</button>
+  <button class="primary" id="btnSave">保存 config.ggxxk.json</button>
+</div>
+
+<script id="catalogData" type="application/json">/*__CATALOG__*/</script>
+<script id="initialChains" type="application/json">/*__INITIAL_CHAINS__*/</script>
+<script>
+const CATALOG = JSON.parse(document.getElementById('catalogData').textContent);
+
+// 三个类别：rule 用来说明"这门课凭什么算这个类别"，与生成脚本保持一致
+const BUCKETS = [
+  { id:'green', label:'绿色文明', need:2,
+    rule:'类别 = 绿色文明',
+    accepts: c => c.category === '绿色文明' },
+  { id:'innov', label:'创新创业', need:2,
+    rule:'课程单元 = 创新创业',
+    accepts: c => c.unit === '创新创业' },
+  { id:'art', label:'艺术审美', need:2,
+    rule:'课程单元 = 美学和艺术史论类 或 艺术鉴赏和评论类',
+    accepts: c => c.unit === '艺术审美（美学和艺术史论类）' || c.unit === '艺术审美（艺术鉴赏和评论类）' },
+];
+
+const INITIAL_CHAINS = (() => {
+  try { return JSON.parse(document.getElementById('initialChains').textContent); }
+  catch { return { green: [], innov: [], art: [] }; }
+})();
+
+const state = {
+  earned: { green:0, innov:0, art:0 },   // 已修学分
+  chains: JSON.parse(JSON.stringify(INITIAL_CHAINS)),// 有序的课程代码
+};
+
+const courses = CATALOG.courses;
+const byCode = new Map(courses.map(c => [c.code, c]));
+
+// ── 课程库渲染 ─────────────────────────────────────────────
+const poolEl = document.getElementById('pool');
+const searchEl = document.getElementById('search');
+const catEl = document.getElementById('catFilter');
+
+document.getElementById('poolCount').textContent = courses.length + ' 门';
+document.getElementById('catalogNote').textContent =
+  (CATALOG.note || '') + '　来源：' + (CATALOG.source || '');
+
+const cats = [...new Set(courses.map(c => c.category))];
+catEl.innerHTML = '<option value="">全部类别</option>' +
+  cats.map(c => `<option value="${c}">${c}</option>`).join('');
+
+function renderPool(){
+  const q = searchEl.value.trim().toLowerCase();
+  const cat = catEl.value;
+  const list = courses.filter(c => {
+    if (cat && c.category !== cat) return false;
+    if (!q) return true;
+    return [c.name, c.code, c.category, c.unit, c.dept, c.nameEn].join(' ').toLowerCase().includes(q);
+  });
+  poolEl.innerHTML = list.slice(0, 200).map(c => {
+    const btns = BUCKETS.map(b => {
+      const okc = b.accepts(c);
+      return `<button data-add="${b.id}" data-code="${c.code}" title="${okc ? '加入' : '不属于该类别（仍可强制加入）'}">+ ${b.label}${okc ? '' : '?'}</button>`;
+    }).join('');
+    return `<div class="course">
+      <div class="meta">
+        <div class="name" title="${esc(c.name)}">${esc(c.name)}</div>
+        <div class="tags"><span class="code">${c.code}</span><span>${c.credits} 学分</span>
+          <span>${esc(c.category)}</span><span>${esc(c.unit)}</span><span>${esc(c.dept)}</span></div>
+      </div>
+      ${btns}
+    </div>`;
+  }).join('') || '<div class="empty">没有匹配的课程</div>';
+}
+
+poolEl.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-add]');
+  if (!btn) return;
+  const code = btn.dataset.code;
+  const bid = btn.dataset.add;
+  const chain = state.chains[bid];
+  if (chain.includes(code)) return;
+  chain.push(code);
+  renderBuckets();
+});
+
+// ── 类别卡片渲染 ───────────────────────────────────────────
+const bucketsEl = document.getElementById('buckets');
+
+function creditsIn(bid){
+  return state.chains[bid].reduce((s, code) => s + (byCode.get(code)?.credits || 0), 0);
+}
+
+function renderBuckets(){
+  bucketsEl.innerHTML = BUCKETS.map(b => {
+    const chain = state.chains[b.id];
+    const got = state.earned[b.id] || 0;
+    const need = Math.max(0, b.need - got);
+    const has = creditsIn(b.id);
+    const done = has >= need;
+    const cls = need === 0 ? 'need-ok' : done ? 'need-ok' : 'need-warn';
+    const items = chain.map((code, i) => {
+      const c = byCode.get(code) || { name: '(未知课程)', credits: 0, code };
+      const miss = b.accepts(c) ? '' : ' <span class="bad" title="这门课不属于该类别">⚠</span>';
+      return `<div class="item">
+        <span class="idx">${i + 1}</span>
+        <div class="meta" style="flex:1;min-width:0">
+          <div class="name">${esc(c.name)}${miss}</div>
+          <div class="tags"><span class="code">${c.code}</span><span>${c.credits} 学分</span><span>${esc(c.unit||'')}</span></div>
+        </div>
+        <button data-move="up" data-b="${b.id}" data-i="${i}" ${i===0?'disabled':''}>↑</button>
+        <button data-move="down" data-b="${b.id}" data-i="${i}" ${i===chain.length-1?'disabled':''}>↓</button>
+        <button data-del="${b.id}" data-i="${i}">✕</button>
+      </div>`;
+    }).join('') || '<div class="empty">还没有候选 —— 从左边课程库加入，或直接让脚本按类别批量填充</div>';
+
+    return `<div class="bucket">
+      <div class="head">
+        <h2>${b.label}</h2>
+        <span class="need">要求 <b>${b.need}</b> 学分 ｜ 已修
+          <input type="number" min="0" max="10" step="1" value="${got}" data-earned="${b.id}"
+            style="width:52px;display:inline-block;padding:2px 6px">学分 ｜ 还需
+          <b class="${cls}">${need}</b> 学分 · 已排 <b class="${cls}">${has}</b></span>
+      </div>
+      <div class="rule">${b.rule}</div>
+      <div class="chain">${items}</div>
+    </div>`;
+  }).join('');
+
+  bucketsEl.querySelectorAll('button[data-del]').forEach(btn => {
+    btn.onclick = () => { state.chains[btn.dataset.del].splice(Number(btn.dataset.i), 1); renderBuckets(); };
+  });
+  bucketsEl.querySelectorAll('button[data-move]').forEach(btn => {
+    btn.onclick = () => {
+      const arr = state.chains[btn.dataset.b];
+      const i = Number(btn.dataset.i);
+      const j = btn.dataset.move === 'up' ? i - 1 : i + 1;
+      if (j < 0 || j >= arr.length) return;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+      renderBuckets();
+    };
+  });
+  bucketsEl.querySelectorAll('input[data-earned]').forEach(inp => {
+    inp.onchange = () => { state.earned[inp.dataset.earned] = Math.max(0, Number(inp.value) || 0); renderBuckets(); };
+  });
+
+  renderStat();
+}
+
+function renderStat(){
+  const lines = [];
+  let problems = 0;
+  for (const b of BUCKETS) {
+    const got = state.earned[b.id] || 0;
+    const need = Math.max(0, b.need - got);
+    const have = creditsIn(b.id);
+    if (need === 0) { lines.push(`<span class="ok">✔ ${b.label}：已修满，无需再抢</span>`); continue; }
+    if (have < need) { problems++; lines.push(`<span class="bad">✖ ${b.label}：还差 ${need} 学分，但候选只够 ${have} 学分</span>`); }
+    else lines.push(`<span class="ok">✔ ${b.label}：需 ${need} 学分，候选 ${state.chains[b.id].length} 门共 ${have} 学分</span>`);
+  }
+  const wrong = BUCKETS.flatMap(b => state.chains[b.id]
+    .filter(code => !b.accepts(byCode.get(code)))
+    .map(code => `${byCode.get(code)?.name || code}（放进了 ${b.label}）`));
+  if (wrong.length) lines.push(`<span class="warn">⚠ 类别不符：${wrong.join('、')} —— 抢到也可能不算该类学分</span>`);
+  lines.push(`<span style="color:var(--dim)">共 ${Object.values(state.chains).reduce((s,a)=>s+a.length,0)} 个候选，0 个表示该类别不会再抢</span>`);
+  document.getElementById('stat').innerHTML = lines.join('<br>');
+  return problems;
+}
+
+// ── 导出 ───────────────────────────────────────────────────
+function buildConfig(){
+  const targets = [];
+  const buckets = [];
+  for (const b of BUCKETS) {
+    const got = state.earned[b.id] || 0;
+    const needCredits = Math.max(0, b.need - got);
+    const ids = [];
+    state.chains[b.id].forEach((code, i) => {
+      const c = byCode.get(code) || {};
+      const id = `${b.id}-${code}`;
+      const codes = code.startsWith('C') ? [code, code.slice(1)] : [code];
+      targets.push({ id, courseCode:{ exact: codes }, priority: i, _name: c.name, _credits: c.credits });
+      ids.push(id);
+    });
+    buckets.push({ id:b.id, label:b.label, rule:b.rule, needCredits, targets:ids });
+  }
+  return {
+    profile: 'ggxxk-xsxkkc',
+    school: 'NJFU',
+    term: { xnm:'2026', xqm:'3' },
+    auth: { entry:'ehall', username:'${NJFU_USER}', password:'${NJFU_PASS}',
+            mode:'autofill', pauseOnCaptcha:true, sessionFile:'state/session.json' },
+    _note: '由 tools/config-ui.html 生成。targets 里的 _name/_credits 只是注释，程序不读。',
+    buckets,
+    targets,
+    strategy: { stopAfterSuccess:false, maxAttemptsPerTarget:0, fullFallbackAfterSec:0 },
+    schedule: {
+      startAt: document.getElementById('startAt').value.trim() || undefined,
+      prewarmSec:120, highFreqBeforeSec:30, highFreqIntervalMs:400, intervalMs:2500, maxRunMinutes:120,
+    },
+    net: { proxy:null, concurrency:1, connectTimeoutMs:5000, readTimeoutMs:20000, maxRetries:6,
+           maxRedirects:20, backoff:{ baseMs:1500, factor:1.6, maxMs:15000, jitter:0.3 },
+           ipv4First:true, rejectUnauthorized:true },
+    safety: { dryRun: document.getElementById('dry').checked, maxSubmitsPerMinute:6 },
+  };
+}
+
+document.getElementById('btnPreview').onclick = () => {
+  const pre = document.getElementById('preview');
+  const show = pre.style.display === 'none';
+  pre.textContent = JSON.stringify(buildConfig(), null, 2);
+  pre.style.display = show ? 'block' : 'none';
+};
+
+document.getElementById('btnSave').onclick = () => {
+  const bad = renderStat();
+  if (bad > 0 && !confirm('有类别凑不够学分，仍要保存吗？')) return;
+  const blob = new Blob([JSON.stringify(buildConfig(), null, 2) + '\n'], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'config.ggxxk.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+function esc(s){ return String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+
+renderPool();
+searchEl.oninput = renderPool;
+catEl.onchange = renderPool;
+renderBuckets();
+</script>
+</body>
+</html>

@@ -179,8 +179,8 @@ export class FlowEngine {
     }
   }
 
-  /** 拉取一次可选课程列表并完成匹配。不产生任何写操作。 */
-  async poll(rawCtx) {
+  /** 拉一次列表并做完列表级过滤。分桶调度时多个桶共用这一次结果。 */
+  async fetchItems(rawCtx) {
     const ctx = this.baseContext(rawCtx);
     const listStep = this.requireStep('list');
     this.stats.cycles += 1;
@@ -199,6 +199,12 @@ export class FlowEngine {
     }
 
     if (this.onItems) this.onItems({ items, ctx, res });
+    return { items, ctx, res };
+  }
+
+  /** 拉取一次可选课程列表并完成匹配。不产生任何写操作。 */
+  async poll(rawCtx) {
+    const { items, ctx } = await this.fetchItems(rawCtx);
 
     const targets = ctx.__activeTargets ?? [];
     if (!targets.length) return { status: 'no-target', count: items.length };
@@ -214,6 +220,38 @@ export class FlowEngine {
     }
 
     return { status: 'matched', match: loose, count: items.length, items };
+  }
+
+  /**
+   * 分桶调度：一次列表请求，为每个桶各自挑一个目标。
+   *
+   * 为什么必须分桶：公选课要同时凑好几个类别（绿色文明 2 分、创新创业 2 分…），
+   * 而旧的全局 selectBest 是"优先级最高者通吃" —— 只要高优先级那门课存在，
+   * 哪怕满员也一直占着决策位，其它类别永远轮不到。分桶后各桶互不阻塞。
+   *
+   * 桶内选择顺序：先要"有名额的"（哪怕优先级低一档），全都满员时才返回满员候选，
+   * 让上层去计满员时长。这样"想等最好的"和"先拿到能拿的"不会互相打架。
+   */
+  async pollBuckets(rawCtx, buckets) {
+    const { items, ctx } = await this.fetchItems(rawCtx);
+    const fields = this.matchFields;
+
+    const results = (buckets ?? []).map((bucket) => {
+      const targets = bucket.targets ?? [];
+      const pick = selectBest(items, targets, fields, { requireAvailable: true });
+      if (pick) {
+        pick.label = this.describeItem(pick.item);
+        return { bucketId: bucket.id, status: 'matched', match: pick, count: items.length };
+      }
+      const loose = selectBest(items, targets, fields, { requireAvailable: false });
+      if (loose) {
+        loose.label = this.describeItem(loose.item);
+        return { bucketId: bucket.id, status: 'found-full', match: loose, count: items.length };
+      }
+      return { bucketId: bucket.id, status: 'no-match', count: items.length };
+    });
+
+    return { status: 'ok', count: items.length, items, results };
   }
 
   /**

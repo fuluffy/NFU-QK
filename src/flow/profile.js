@@ -7,6 +7,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -94,5 +95,13 @@ export function validateProfile(profile) {
 }
 
 export function listProfileNames() {
-  return ['pe', 'ggxxk'];
+  // 扫目录而不是写死：新增一条路线（比如换了个端点族）不该还要回来改这里
+  try {
+    return readdirSync(PROFILE_DIR)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => f.slice(0, -'.json'.length))
+      .sort();
+  } catch {
+    return ['pe', 'ggxxk'];
+  }
 }

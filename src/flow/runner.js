@@ -47,6 +47,18 @@ export class Runner {
     /** 满员降级：目标 id → 首次发现满员的时间 / 已降级集合 */
     this.fullSince = new Map();
     this.demoted = new Set();
+    /**
+     * 分桶调度：一个桶 = 一个"必须满足的类别"（如绿色文明 2 学分）。
+     * 不配置时完全走旧的单桶路径，行为一字不变。
+     * targets 统一归一成目标 id 字符串，配置里写 id 或对象都接受。
+     */
+    this.buckets = (opts.buckets ?? []).map((b) => ({
+      ...b,
+      needCredits: Number(b.needCredits ?? 1),
+      targets: (b.targets ?? []).map((t) => (typeof t === 'string' ? t : t?.id)).filter(Boolean),
+    }));
+    /** 桶 id → 已抢到并确认的学分 */
+    this.bucketCredits = new Map();
   }
 
   stop() {
@@ -84,6 +96,12 @@ export class Runner {
       `启动：${this.store.all().length} 个目标｜间隔 ${this.schedule.intervalMs ?? 2500}ms（临近开抢 ${this.schedule.highFreqIntervalMs ?? 400}ms）｜提交上限 ${this.safety.maxSubmitsPerMinute ?? 6}/分钟`,
       this.schedule.startAt ? `｜开抢 ${this.schedule.startAt}` : '｜未设定时（立即执行）',
     );
+    if (this.buckets.length) {
+      this.logger?.info(
+        `分桶模式：${this.buckets.length} 个类别 —— ` +
+          this.buckets.map((b) => `${b.label ?? b.id} ${b.needCredits} 学分`).join('、'),
+      );
+    }
 
     while (!this.stopped) {
       if (this.now() - startedAt > maxMs) {
@@ -95,7 +113,13 @@ export class Runner {
 
       // 先判"是否已经抢到"，再判"是否还有活干"。
       // 顺序反了的话，成功会被归类成"全部结束"，用户看不到 success 结局。
-      if (stopAfterSuccess && this.store.all().some((e) => e.status === STATUS.SUCCESS)) {
+      // 分桶模式下"成功"的定义不是抢到一门，而是每个类别都修满学分。
+      if (this.buckets.length) {
+        if (this.allBucketsSatisfied()) {
+          outcome = 'success';
+          break;
+        }
+      } else if (stopAfterSuccess && this.store.all().some((e) => e.status === STATUS.SUCCESS)) {
         outcome = 'success';
         break;
       }
@@ -194,6 +218,8 @@ export class Runner {
 
   /** 单次轮询 + 命中即提交。 */
   async cycle(ctx) {
+    if (this.buckets.length) return this.cycleBuckets(ctx);
+
     const active = this.store.activeTargets();
     if (!active.length) return { status: 'idle' };
     ctx.__activeTargets = this.applyDemotion(active);
@@ -229,6 +255,12 @@ export class Runner {
     this.store.markAttempt(match.target.id, { reason: describe(match) });
     const result = await this.engine.attempt(ctx, match);
 
+    this.applyResult(match, result);
+    return result;
+  }
+
+  /** 把一次尝试的结果落到状态机与日志上。单桶/分桶两条路径共用。 */
+  applyResult(match, result) {
     switch (result.status) {
       case 'dry-run':
         this.store.markSkipped(match.target.id, '干跑模式');
@@ -271,7 +303,124 @@ export class Runner {
     }
 
     if (this.onResult) this.onResult(result);
-    return result;
+  }
+
+  /** 某门课能抵多少学分：目标里写死优先，否则取列表返回的学分字段。 */
+  creditsOf(match) {
+    const explicit = Number(match?.target?.credits);
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    const field = this.engine?.matchFields?.credits ?? 'xf';
+    const value = Number(match?.item?.[field]);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  /** 该桶里还有哪些目标待处理。 */
+  bucketActiveTargets(bucket) {
+    const ids = new Set((bucket.targets ?? []).map((t) => (typeof t === 'string' ? t : t?.id)));
+    return this.store.activeTargets().filter((t) => ids.has(t.id));
+  }
+
+  /** 还没修满学分、且仍有候选可打的桶。 */
+  openBuckets() {
+    const open = [];
+    for (const bucket of this.buckets) {
+      const got = this.bucketCredits.get(bucket.id) ?? 0;
+      if (got >= bucket.needCredits) continue;
+      const targets = this.bucketActiveTargets(bucket);
+      if (!targets.length) {
+        this.logger?.warn(
+          `类别「${bucket.label ?? bucket.id}」的候选已全部用尽，仍未修满 ${bucket.needCredits} 学分`,
+        );
+        continue;
+      }
+      open.push({ ...bucket, got, activeTargets: targets });
+    }
+    return open;
+  }
+
+  allBucketsSatisfied() {
+    if (!this.buckets.length) return false;
+    return this.buckets.every((b) => (this.bucketCredits.get(b.id) ?? 0) >= b.needCredits);
+  }
+
+  /**
+   * 一轮分桶调度：一次列表请求，各桶各自挑课、各自提交，互不阻塞。
+   *
+   * 这是公选课与体育课最本质的差别：体育课只要"抢到一门"，谁先谁后无所谓；
+   * 公选课要"每个类别都修够"，某个类别满员不该拖住其它类别。
+   */
+  async cycleBuckets(ctx) {
+    const open = this.openBuckets();
+    if (!open.length) return { status: 'buckets-done' };
+
+    const poll = await this.engine.pollBuckets(
+      ctx,
+      open.map((b) => ({ id: b.id, targets: b.activeTargets })),
+    );
+
+    let matchedCount = 0;
+    for (const r of poll.results) {
+      const bucket = open.find((b) => b.id === r.bucketId);
+      if (!bucket) continue;
+      const tag = bucket.label ?? bucket.id;
+
+      if (r.status === 'no-match') {
+        this.logThrottled(`「${tag}」未匹配到候选（列表 ${poll.count} 条）`);
+        continue;
+      }
+      if (r.status === 'found-full') {
+        this.noteFull(r.match.target, this.now());
+        this.logThrottled(
+          `「${tag}」候选「${describe(r.match)}」已满员（已修 ${bucket.got}/${bucket.needCredits} 学分），等退课…`,
+        );
+        continue;
+      }
+
+      await this.limiter.acquire(this.sleep);
+
+      this.fullSince.delete(r.match.target.id);
+      this.logger?.info(`「${tag}」命中「${describe(r.match)}」→ 提交（本轮列表 ${poll.count} 条）`);
+      this.store.markAttempt(r.match.target.id, { reason: describe(r.match) });
+
+      let result;
+      try {
+        result = await this.engine.attempt(ctx, r.match);
+      } catch (err) {
+        // 会话失效必须往上抛，由主循环统一重登；其它异常只影响这一个桶
+        if (err instanceof SessionExpiredError) throw err;
+        this.counters.netErrors += 1;
+        this.logger?.warn(`「${tag}」提交异常：${err.message ?? err}`);
+        continue;
+      }
+
+      this.applyResult(r.match, result);
+      matchedCount += 1;
+
+      if (result.status === 'success') {
+        const gained = this.creditsOf(r.match);
+        const total = (this.bucketCredits.get(bucket.id) ?? 0) + gained;
+        this.bucketCredits.set(bucket.id, total);
+        const done = total >= bucket.needCredits;
+        this.logger?.info(
+          `「${tag}」进度 ${Math.min(total, bucket.needCredits)}/${bucket.needCredits} 学分` +
+            (done ? ' —— 该类别已达标 ✅' : '，继续'),
+        );
+        if (done) this.retireBucket(bucket);
+      }
+    }
+
+    return { status: 'ok', count: poll.count, matched: matchedCount };
+  }
+
+  /** 某桶达标后，把它名下还没打的目标标记为跳过，别让它们继续占轮询。 */
+  retireBucket(bucket) {
+    const ids = new Set((bucket.targets ?? []).map((t) => (typeof t === 'string' ? t : t?.id)));
+    for (const entry of this.store.all()) {
+      const st = entry.status;
+      if (ids.has(entry.target.id) && (st === STATUS.PENDING || st === STATUS.COOLDOWN)) {
+        this.store.markSkipped(entry.target.id, `所属类别「${bucket.label ?? bucket.id}」已修满`);
+      }
+    }
   }
 
   async handleSessionExpired(err) {
