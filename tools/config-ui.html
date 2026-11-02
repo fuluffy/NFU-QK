@@ -3,260 +3,847 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NFU-QK 公选课配置器</title>
+<title>NFU-QK · 公选课配置器</title>
 <style>
-  :root{
-    --bg:#0f1115; --panel:#161a21; --panel2:#1c212a; --line:#262c37;
-    --text:#e6e9ef; --dim:#9aa4b2; --accent:#4c8dff; --ok:#3ecf8e; --warn:#ffb020; --bad:#ff5c5c;
+:root{
+  --bg:#08090c;
+  --panel:rgba(255,255,255,.032);
+  --panel-hi:rgba(255,255,255,.05);
+  --line:rgba(255,255,255,.078);
+  --line-hi:rgba(255,255,255,.13);
+  --text:#e9ecf2;
+  --dim:#878f9d;
+  --faint:#565d6b;
+  --accent:#7aa2ff;
+  --green:#3ddc97;
+  --amber:#f2b544;
+  --violet:#b98bff;
+  --danger:#ff6b6b;
+  --r:14px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;color:var(--text);
+  font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  background:
+    radial-gradient(820px 460px at 12% -8%, rgba(122,162,255,.10), transparent 62%),
+    radial-gradient(680px 380px at 96% -4%, rgba(185,139,255,.075), transparent 58%),
+    var(--bg);
+  background-attachment:fixed;
+  /* 桌面端是"应用"而不是长页面：两栏各自滚动，外框不滚 */
+  display:flex;flex-direction:column;overflow:hidden;
+}
+::selection{background:rgba(122,162,255,.30)}
+code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.92em}
+
+/* 滚动条 */
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:rgba(255,255,255,.09);border-radius:6px;border:3px solid transparent;background-clip:padding-box}
+*::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.18);background-clip:padding-box}
+
+/* ── 顶栏 ───────────────────────────────────── */
+.topbar{
+  flex:none;z-index:40;
+  display:flex;align-items:center;gap:28px;flex-wrap:wrap;
+  padding:16px 28px;
+  background:rgba(8,9,12,.72);
+  backdrop-filter:blur(18px) saturate(1.4);
+  -webkit-backdrop-filter:blur(18px) saturate(1.4);
+  border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.mark{
+  width:36px;height:36px;border-radius:11px;flex:none;
+  display:grid;place-items:center;
+  font-size:11px;font-weight:700;letter-spacing:.5px;
+  color:#0a0d14;
+  background:linear-gradient(145deg,var(--accent),var(--violet));
+  box-shadow:0 4px 16px -4px rgba(122,162,255,.6);
+}
+.titles h1{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.titles p{margin:1px 0 0;font-size:12px;color:var(--faint)}
+
+.meters{display:flex;gap:10px;margin-left:auto;flex-wrap:wrap}
+.meter{
+  min-width:126px;padding:7px 11px 8px;border-radius:10px;
+  border:1px solid var(--line);background:var(--panel);
+  cursor:pointer;transition:border-color .16s,background .16s,transform .16s;
+}
+.meter:hover{border-color:var(--line-hi);background:var(--panel-hi);transform:translateY(-1px)}
+.meter .top{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.meter .dot{width:5px;height:5px;border-radius:50%;background:var(--c);flex:none}
+.meter .lbl{font-size:11.5px;color:var(--dim);white-space:nowrap}
+.meter .num{
+  margin-left:auto;font-size:11px;font-variant-numeric:tabular-nums;color:var(--faint);
+  white-space:nowrap;
+}
+.meter.done .num{color:var(--c)}
+.meter.lack{border-color:rgba(242,181,68,.35);background:rgba(242,181,68,.05)}
+.meter.lack .num{color:var(--amber)}
+.bar{height:3px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden}
+.bar>i{display:block;height:100%;width:0;border-radius:2px;background:var(--c);transition:width .35s cubic-bezier(.4,0,.2,1)}
+.meter.done .lbl{color:var(--text)}
+
+/* ── 布局 ───────────────────────────────────── */
+.layout{
+  flex:1;min-height:0;
+  display:grid;grid-template-columns:minmax(330px,.86fr) minmax(440px,1.14fr);
+  gap:18px;width:100%;max-width:1460px;margin:0 auto;padding:18px 28px;
+  align-items:stretch;
+}
+
+.panel{
+  position:relative;
+  border:1px solid var(--line);border-radius:var(--r);
+  background:var(--panel);
+  overflow:hidden;
+  display:flex;flex-direction:column;min-height:0;
+}
+.panel-head{
+  flex:none;display:flex;align-items:center;gap:10px;
+  padding:14px 16px 12px;
+  border-bottom:1px solid var(--line);
+}
+.panel-head h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.01em}
+.panel-head .count{
+  font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums;
+  padding:1px 7px;border-radius:999px;border:1px solid var(--line);
+}
+.panel-head .spacer{flex:1}
+
+/* ── 搜索与筛选 ─────────────────────────────── */
+.filters{flex:none;padding:12px 16px 10px;border-bottom:1px solid var(--line)}
+.search{
+  position:relative;display:flex;align-items:center;
+}
+.search svg{position:absolute;left:11px;width:14px;height:14px;stroke:var(--faint);pointer-events:none}
+.search input{
+  width:100%;padding:9px 12px 9px 33px;
+  background:rgba(255,255,255,.035);border:1px solid var(--line);
+  border-radius:9px;color:var(--text);font:inherit;font-size:13px;outline:none;
+  transition:border-color .16s,background .16s;
+}
+.search input::placeholder{color:var(--faint)}
+.search input:focus{border-color:rgba(122,162,255,.55);background:rgba(122,162,255,.05)}
+.search .clr{
+  position:absolute;right:8px;width:20px;height:20px;border:0;border-radius:6px;
+  background:transparent;color:var(--faint);cursor:pointer;display:none;place-items:center;font-size:14px;
+}
+.search input:not(:placeholder-shown)+.clr{display:grid}
+.search .clr:hover{color:var(--text);background:rgba(255,255,255,.07)}
+
+.chips{display:flex;gap:5px;margin-top:9px;flex-wrap:wrap}
+.chip{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:4px 9px;border-radius:7px;cursor:pointer;user-select:none;
+  border:1px solid var(--line);background:transparent;
+  font:inherit;font-size:11.5px;color:var(--dim);white-space:nowrap;
+  transition:.14s;
+}
+.chip:hover{border-color:var(--line-hi);color:var(--text)}
+.chip.on{
+  background:rgba(122,162,255,.12);border-color:rgba(122,162,255,.45);color:#c9d9ff;
+}
+.chip .n{font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.chip.on .n{color:rgba(201,217,255,.7)}
+.chip .d{width:5px;height:5px;border-radius:50%;background:var(--c,transparent)}
+
+/* ── 课程池 ─────────────────────────────────── */
+.pool{
+  flex:1;min-height:0;overflow-y:auto;
+  padding:8px 8px 34px;
+  overscroll-behavior:contain;
+}
+
+.course{
+  position:relative;display:flex;align-items:center;gap:10px;
+  padding:7px 10px 7px 13px;border-radius:8px;cursor:pointer;
+  transition:background .13s;
+}
+.course+.course{margin-top:1px}
+.course::before{
+  content:"";position:absolute;left:3px;top:50%;transform:translateY(-50%);
+  width:2px;height:16px;border-radius:2px;background:var(--c);opacity:.45;
+  transition:height .18s cubic-bezier(.4,0,.2,1),opacity .18s;
+}
+.course:hover{background:rgba(255,255,255,.045)}
+.course:hover::before{height:22px;opacity:1}
+.course.in{background:rgba(122,162,255,.055)}
+.course.in::before{background:var(--accent);opacity:.75}
+.course.muted{opacity:.5}
+
+.course .body{min-width:0;flex:1}
+.course .nm{
+  font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  display:flex;align-items:center;gap:7px;
+}
+.course .nm b{font-weight:400;overflow:hidden;text-overflow:ellipsis}
+.course.muted .nm b{color:var(--dim)}
+.course .sub{
+  margin-top:1px;font-size:11px;color:var(--faint);
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+}
+.course .sub .sep{color:rgba(255,255,255,.14)}
+.course .tag{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:11px;color:var(--dim);
+}
+.course .tag .d{width:5px;height:5px;border-radius:50%;background:var(--c);flex:none}
+.cr{
+  flex:none;font-size:11px;font-variant-numeric:tabular-nums;
+  color:var(--dim);padding:1px 6px;border-radius:5px;
+  background:rgba(255,255,255,.05);
+}
+.addbtn{
+  flex:none;width:26px;height:26px;border-radius:8px;
+  border:1px solid var(--line-hi);background:transparent;color:var(--faint);
+  cursor:pointer;display:grid;place-items:center;
+  opacity:.3;transition:.14s;
+}
+.addbtn svg{width:12px;height:12px;stroke:currentColor;stroke-width:2.2;fill:none}
+.course:hover .addbtn{opacity:1}
+.addbtn:hover{background:var(--accent);border-color:var(--accent);color:#08090c}
+.badge{
+  flex:none;width:22px;height:22px;border-radius:50%;
+  display:grid;place-items:center;
+  background:rgba(122,162,255,.14);color:#a9c3ff;
+}
+.badge svg{width:11px;height:11px;stroke:currentColor;stroke-width:2.4;fill:none}
+.empty{
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  padding:40px 16px;color:var(--faint);font-size:12.5px;text-align:center;
+}
+
+/* ── 方案面板 ───────────────────────────────── */
+.plan{padding:0}
+.plan-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:34px}
+
+.bkt{
+  margin:10px 10px 0;padding:12px 13px 10px;
+  border-radius:11px;border:1px solid var(--line);
+  background:rgba(255,255,255,.022);
+}
+.bkt:last-child{margin-bottom:10px}
+.bkt-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.bkt-head .dot{width:7px;height:7px;border-radius:50%;background:var(--c);flex:none}
+.bkt-head h3{margin:0;font-size:13px;font-weight:600}
+.bkt-head .st{margin-left:auto;font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--amber);flex:none}
+.bkt-head .st.ok{color:var(--c);opacity:.72}
+
+.bkt-meta{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.bkt-meta .rule{
+  font-size:11px;color:var(--dim);opacity:.72;min-width:0;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.bkt-meta .cnt{font-size:11px;color:var(--faint);flex:none}
+.stepper{
+  display:flex;align-items:center;flex:none;
+  border:1px solid var(--line);border-radius:7px;overflow:hidden;
+  background:rgba(255,255,255,.03);
+}
+.stepper button{
+  width:19px;height:21px;border:0;background:transparent;color:var(--faint);
+  cursor:pointer;font-size:12px;line-height:1;padding:0;transition:.12s;
+}
+.stepper button:hover{background:rgba(255,255,255,.08);color:var(--text)}
+.stepper .v{
+  min-width:38px;text-align:center;font-size:10.5px;color:var(--faint);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.stepper .v b{color:var(--text);font-weight:500}
+
+.slots{min-height:44px;border-radius:10px;transition:background .14s}
+.slots.drop{background:rgba(122,162,255,.07);outline:1px dashed rgba(122,162,255,.35);outline-offset:2px}
+
+.slot{
+  display:flex;align-items:center;gap:9px;
+  padding:7px 9px;border-radius:9px;cursor:grab;
+  background:rgba(255,255,255,.032);
+  border:1px solid transparent;
+  transition:background .13s,border-color .13s,opacity .13s;
+}
+.slot button{cursor:pointer}
+.slot+.slot{margin-top:3px}
+.slot:hover{background:rgba(255,255,255,.06);border-color:var(--line)}
+.slot.dragging{opacity:.35}
+.slot.drop-target{border-color:rgba(122,162,255,.6);background:rgba(122,162,255,.1)}
+
+.slot .grip{
+  flex:none;width:14px;cursor:grab;color:var(--faint);
+  display:flex;align-items:center;justify-content:center;
+}
+.slot .grip:active{cursor:grabbing}
+.slot .grip svg{width:10px;height:14px;fill:currentColor;opacity:.55}
+.slot:hover .grip svg{opacity:1}
+
+.slot .idx{
+  flex:none;width:18px;text-align:center;font-size:11px;
+  color:var(--faint);font-variant-numeric:tabular-nums;
+}
+.slot .body{flex:1;min-width:0}
+.slot .nm{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot .sub{font-size:11px;color:var(--faint);margin-top:1px;display:flex;gap:6px;align-items:center}
+.slot .warn{color:var(--amber);font-size:10.5px}
+.slot .del{
+  flex:none;width:22px;height:22px;border-radius:6px;border:0;background:transparent;
+  color:var(--faint);cursor:pointer;opacity:0;transition:.13s;
+  display:grid;place-items:center;
+}
+.slot .del svg{width:11px;height:11px;stroke:currentColor;stroke-width:2;fill:none}
+.slot:hover .del{opacity:1}
+.slot .del:hover{background:rgba(255,107,107,.14);color:var(--danger)}
+
+.no-slot{
+  padding:11px 12px;border-radius:9px;text-align:center;
+  font-size:11.5px;color:var(--faint);
+  border:1px dashed var(--line);
+}
+.more{
+  flex:none;padding:2px 7px;border:0;border-radius:5px;background:transparent;
+  color:var(--faint);font:inherit;font-size:11px;cursor:pointer;
+  white-space:nowrap;transition:.13s;
+}
+.more:hover{background:rgba(255,255,255,.07);color:var(--dim)}
+
+/* ── 底部 dock ──────────────────────────────── */
+.dock{
+  flex:none;z-index:50;
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:11px 28px;
+  background:rgba(8,9,12,.82);
+  backdrop-filter:blur(18px) saturate(1.4);
+  -webkit-backdrop-filter:blur(18px) saturate(1.4);
+  border-top:1px solid var(--line);
+}
+@media (max-width:980px){.dock{padding:10px 16px;gap:10px}}
+
+.switch{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.switch input{display:none}
+.switch .track{
+  width:34px;height:19px;border-radius:999px;flex:none;
+  background:rgba(255,255,255,.10);position:relative;transition:.18s;
+}
+.switch .track::after{
+  content:"";position:absolute;top:2.5px;left:2.5px;
+  width:14px;height:14px;border-radius:50%;background:#fff;
+  transition:.18s cubic-bezier(.4,0,.2,1);
+}
+.switch input:checked+.track{background:var(--green)}
+.switch input:checked+.track::after{transform:translateX(15px)}
+.switch .txt{font-size:12.5px;color:var(--text);white-space:nowrap}
+
+.field{display:flex;align-items:center;gap:8px}
+.field label{font-size:11.5px;color:var(--faint);flex:none}
+.field input{
+  width:196px;padding:6px 10px;border-radius:8px;
+  border:1px solid var(--line);background:rgba(255,255,255,.035);
+  color:var(--text);font:inherit;font-size:12px;
+  font-family:ui-monospace,Consolas,monospace;outline:none;
+  transition:border-color .16s;
+}
+.field input:focus{border-color:rgba(122,162,255,.55)}
+.dock-hint{font-size:11.5px;color:var(--faint)}
+.dock-hint code{color:var(--dim);font-size:11px}
+@media (max-width:1180px){.dock-hint{display:none}}
+
+.btn{
+  padding:7px 14px;border-radius:9px;font:inherit;font-size:12.5px;
+  border:1px solid var(--line-hi);background:rgba(255,255,255,.045);
+  color:var(--text);cursor:pointer;transition:.15s;white-space:nowrap;
+}
+.btn:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.2)}
+.btn:active{transform:translateY(.5px)}
+.btn.primary{
+  background:linear-gradient(140deg,var(--accent),#6d8dff);
+  border-color:transparent;color:#070a10;font-weight:600;
+  box-shadow:0 4px 18px -6px rgba(122,162,255,.7);
+}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.sm{padding:5px 10px;font-size:11.5px;border-radius:7px;color:var(--dim)}
+.btn.sm:hover{color:var(--text)}
+
+/* ── 弹层 ───────────────────────────────────── */
+.modal{
+  position:fixed;inset:0;z-index:80;display:none;
+  align-items:center;justify-content:center;padding:24px;
+  background:rgba(0,0,0,.62);backdrop-filter:blur(6px);
+}
+.modal.show{display:flex}
+.modal .box{
+  width:min(720px,100%);max-height:82vh;display:flex;flex-direction:column;
+  background:#0d0f14;border:1px solid var(--line-hi);border-radius:16px;
+  box-shadow:0 24px 80px -20px rgba(0,0,0,.9);
+  overflow:hidden;
+  animation:pop .18s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+.modal .box header{
+  display:flex;align-items:center;gap:10px;padding:13px 16px;
+  border-bottom:1px solid var(--line);font-size:13px;font-weight:600;
+}
+.modal .box header .spacer{flex:1}
+.modal pre{
+  margin:0;padding:16px;overflow:auto;font-size:11.5px;line-height:1.65;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  color:#a9b4c6;flex:1;
+}
+.modal .x{
+  width:26px;height:26px;border-radius:7px;border:0;background:transparent;
+  color:var(--faint);cursor:pointer;display:grid;place-items:center;font-size:16px;
+}
+.modal .x:hover{background:rgba(255,255,255,.08);color:var(--text)}
+
+/* toast */
+.toast{
+  position:fixed;left:50%;bottom:74px;transform:translate(-50%,10px);
+  padding:9px 16px;border-radius:10px;font-size:12.5px;
+  background:rgba(30,34,44,.96);border:1px solid var(--line-hi);
+  color:var(--text);box-shadow:0 12px 40px -12px rgba(0,0,0,.8);
+  opacity:0;pointer-events:none;transition:.22s;z-index:90;
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ── 窄屏：退回普通长页面 ───────────────────── */
+@media (max-width:980px){
+  body{display:block;overflow:auto;height:auto}
+  .topbar{padding:14px 16px;gap:14px}
+  .meters{width:100%;margin-left:0}
+  .meter{flex:1;min-width:0}
+  .layout{
+    display:block;height:auto;padding:14px 16px 90px;
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);
-    font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
-  header{padding:20px 24px 12px;border-bottom:1px solid var(--line)}
-  h1{margin:0 0 6px;font-size:18px;font-weight:600}
-  .sub{color:var(--dim);font-size:12.5px}
-  .wrap{display:grid;grid-template-columns:minmax(320px,1fr) minmax(420px,1.15fr);gap:16px;padding:16px 24px 40px}
-  @media (max-width:1000px){.wrap{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
-  .card h2{margin:0 0 4px;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
-  .rule{color:var(--dim);font-size:12px;margin-bottom:10px}
-  input[type=text],input[type=number],select{
-    background:var(--panel2);border:1px solid var(--line);color:var(--text);
-    border-radius:7px;padding:7px 10px;font:inherit;outline:none;width:100%}
-  input:focus,select:focus{border-color:var(--accent)}
-  .row{display:flex;gap:8px;align-items:center}
-  .pool{max-height:52vh;overflow:auto;margin-top:10px;border-top:1px solid var(--line)}
-  .course{padding:8px 2px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
-  .course .meta{flex:1;min-width:0}
-  .name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .tags{color:var(--dim);font-size:11.5px;display:flex;gap:8px;flex-wrap:wrap}
-  .code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--dim)}
-  button{background:var(--panel2);border:1px solid var(--line);color:var(--text);
-    border-radius:6px;padding:4px 9px;font:inherit;font-size:12px;cursor:pointer}
-  button:hover{border-color:var(--accent);color:#fff}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;padding:8px 16px;font-size:13px}
-  button.ghost{background:transparent}
-  button:disabled{opacity:.35;cursor:not-allowed}
-  .bucket{margin-bottom:14px}
-  .bucket .head{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-  .need{font-size:12px;color:var(--dim)}
-  .need b{color:var(--text)}
-  .need-ok{color:var(--ok)}
-  .need-warn{color:var(--warn)}
-  .chain{margin-top:8px;border-top:1px dashed var(--line);padding-top:8px}
-  .item{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
-  .idx{width:20px;color:var(--dim);font-size:11.5px;text-align:right;font-family:ui-monospace,monospace}
-  .empty{color:var(--dim);font-size:12px;padding:10px 0}
-  .toolbar{display:flex;gap:8px;margin-bottom:10px}
-  .stat{font-size:12px;color:var(--dim);margin-top:10px;line-height:1.8}
-  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
-  .footer{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);
-    padding:12px 24px;display:flex;gap:10px;align-items:center}
-  .chk{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--dim)}
-  .pill{font-size:11px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
-  pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;
-    max-height:220px;overflow:auto;font-size:11.5px;margin:10px 0 0}
+  .panel{display:block;overflow:visible}
+  .panel+.panel{margin-top:14px}
+  .pool{max-height:none;overflow:visible}
+  .plan-body{overflow:visible}
+  .dock{position:fixed;left:0;right:0;bottom:0;padding:10px 16px;gap:10px}
+  .field input{width:150px}
+}
 </style>
 </head>
 <body>
-<header>
-  <h1>NFU-QK 公选课配置器</h1>
-  <div class="sub">按类别凑学分 · 课程代码精确匹配 · 生成后保存到项目根目录，用 <code>node src/cli.js run --config config.ggxxk.json</code> 运行</div>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark">NFU</div>
+    <div class="titles">
+      <h1>公选课配置器</h1>
+      <p>南京林业大学 · 2026 秋季学期 · 仅含开课学期带「秋」的课程</p>
+    </div>
+  </div>
+  <div class="meters" id="meters"></div>
 </header>
 
-<div class="wrap">
-  <section class="card">
-    <h2>课程库 <span class="pill" id="poolCount"></span></h2>
-    <div class="rule" id="catalogNote"></div>
-    <div class="toolbar">
-      <input type="text" id="search" placeholder="搜索课程名 / 代码 / 类别 / 单元 / 开课单位">
+<main class="layout">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>课程库</h2>
+      <span class="count" id="poolCount">0</span>
+      <div class="spacer"></div>
+      <button class="btn sm" id="btnHint">怎么用</button>
     </div>
-    <div class="row" style="margin-bottom:8px">
-      <select id="catFilter"></select>
+    <div class="filters">
+      <div class="search">
+        <svg viewBox="0 0 16 16" fill="none" stroke-width="1.8"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14" stroke-linecap="round"/></svg>
+        <input id="search" type="text" placeholder="搜索课程名、代码、学院…" autocomplete="off">
+        <button class="clr" id="btnClearSearch" title="清空">✕</button>
+      </div>
+      <div class="chips" id="chips"></div>
     </div>
     <div class="pool" id="pool"></div>
   </section>
 
-  <section class="card">
-    <h2>我需要的类别</h2>
-    <div class="rule">目标学分达到后，该类别自动停止；同一类别内按顺序尝试，前一门满员就换下一门。</div>
-    <div id="buckets"></div>
-    <div class="stat" id="stat"></div>
-    <pre id="preview" style="display:none"></pre>
+  <section class="panel plan">
+    <div class="panel-head">
+      <h2>我的方案</h2>
+      <span class="count" id="planCount">0 门</span>
+      <div class="spacer"></div>
+      <button class="btn sm" id="btnReset">重置推荐</button>
+      <button class="btn sm" id="btnClearAll">清空</button>
+    </div>
+    <div id="buckets" class="plan-body"></div>
   </section>
+</main>
+
+<div class="dock">
+  <label class="switch" title="打开时只做匹配与凭证获取，不会真的提交选课">
+    <input type="checkbox" id="dry" checked>
+    <span class="track"></span>
+    <span class="txt">干跑</span>
+  </label>
+  <div class="field">
+    <label>开抢时间</label>
+    <input id="startAt" type="text" value="2026-11-03T12:30:00+08:00" spellcheck="false">
+  </div>
+  <div class="dock-hint">下载后放项目根目录，跑 <code>node src/cli.js run --config config.ggxxk.json</code></div>
+  <div style="flex:1"></div>
+  <button class="btn" id="btnPreview">预览配置</button>
+  <button class="btn primary" id="btnSave">保存配置文件</button>
 </div>
 
-<div class="footer">
-  <label class="chk"><input type="checkbox" id="dry" checked> 干跑（不做真实提交）</label>
-  <label class="chk">开抢时间 <input type="text" id="startAt" style="width:210px" value="2026-11-03T12:30:00+08:00"></label>
-  <div style="flex:1"></div>
-  <button class="ghost" id="btnPreview">预览 JSON</button>
-  <button class="primary" id="btnSave">保存 config.ggxxk.json</button>
+<div class="modal" id="modal">
+  <div class="box">
+    <header>
+      <span id="modalTitle">配置预览</span>
+      <div class="spacer"></div>
+      <button class="x" id="modalClose">✕</button>
+    </header>
+    <pre id="modalBody"></pre>
+  </div>
 </div>
+
+<div class="toast" id="toast"></div>
 
 <script id="catalogData" type="application/json">{"source":"学校官方《通识选修课》课表 202610291744032792kb11h.xlsx","note":"仅保留开课学期含「秋」的课程；原表 158 门，过滤后 90 门。该表不含容量/教师/上课时间，这些只能从选课系统实时获取。","term":"2026-2027-1","count":90,"courses":[{"code":"4028002","name":"南林校史与文化","nameEn":"The History Developments and Culuture Constituents of NFU","category":"绿色文明","unit":"绿色发展","semester":"春、秋","credits":1,"hours":16,"dept":"档案馆"},{"code":"4014002","name":"中国古典家具赏析","nameEn":"Appreciation of classical furniture","category":"绿色文明","unit":"绿色发展","semester":"春、秋","credits":2,"hours":32,"dept":"家居院"},{"code":"4014012","name":"家居装饰赏析","nameEn":"Furniture Decoration Appreciation","category":"绿色文明","unit":"绿色发展","semester":"春、秋","credits":2,"hours":32,"dept":"家居院"},{"code":"4001018","name":"园艺文化","nameEn":"The Culture of Horticulture","category":"绿色文明","unit":"绿色发展","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4015005","name":"纸与中华文明","nameEn":"Paper and Chinese culture art","category":"绿色文明","unit":"绿色发展","semester":"春、秋","credits":2,"hours":32,"dept":"轻工院"},{"code":"4010010","name":"从古代智慧到现代卫星：解码城市蓝绿空间","nameEn":"From Ancient Wisdom to Satellites: Decoding the Urban Blue-Green Landscape","category":"绿色文明","unit":"绿色发展","semester":"春、秋","credits":1,"hours":16,"dept":"园林院"},{"code":"4005017","name":"生态旅游","nameEn":"Ecotourism","category":"绿色文明","unit":"生态文明","semester":"春、秋","credits":2,"hours":32,"dept":"经管院"},{"code":"4001010","name":"园艺与健康","nameEn":"Horticulture and health","category":"绿色文明","unit":"生态文明","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4001011","name":"森林信息学导论","nameEn":"Introduction to forest information science","category":"绿色文明","unit":"生态文明","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4001016","name":"生物多样性与绿色发展","nameEn":"Biodiversity and Green Development","category":"绿色文明","unit":"生态文明","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4001017","name":"植物的奥秘与精彩","nameEn":"The Mystery and Wonderful of Plants","category":"绿色文明","unit":"生态文明","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4007032","name":"生态文学欣赏","nameEn":"Ecological Works Appreciation","category":"绿色文明","unit":"生态文明","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4017022","name":"生态学概论","nameEn":"Introduction to Ecology","category":"绿色文明","unit":"生态文明","semester":"春、秋","credits":2,"hours":32,"dept":"生环院"},{"code":"4014007","name":"家具环境检测","nameEn":"Furnishing Env ironment Testing","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":2,"hours":32,"dept":"家居院"},{"code":"4017011","name":"湿地保护","nameEn":"Wetland Protection","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":2,"hours":32,"dept":"生环院"},{"code":"4017012","name":"环境保护与可持续发展","nameEn":"Environmental Protection and Sustainable Development","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":2,"hours":32,"dept":"生环院"},{"code":"4017015","name":"环境与人类健康","nameEn":"Environment and Health","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":2,"hours":32,"dept":"生环院"},{"code":"4017035","name":"可再生资源","nameEn":"Renewable Resources Utilization for Development","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":1,"hours":16,"dept":"生环院"},{"code":"4017036","name":"土壤与农产品安全","nameEn":"Soil and agricultural products safety","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":1,"hours":16,"dept":"生环院"},{"code":"4017023","name":"舌尖上的“食品”安全","nameEn":"Food safety at the tip of the tongue","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":2,"hours":32,"dept":"生环院"},{"code":"4017024","name":"塑料的奥秘","nameEn":"The Mystery of Plastics","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":2,"hours":32,"dept":"生环院"},{"code":"4018020","name":"人类生态学","nameEn":"Human  ecology","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":2,"hours":32,"dept":"生科院"},{"code":"4007018","name":"普通话口语艺术","nameEn":"The Art of Mandarin","category":"人文素养","unit":"沟通表达","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4026001","name":"健康教育","nameEn":"Health Education","category":"人文素养","unit":"沟通表达","semester":"春、秋","credits":2,"hours":32,"dept":"校医院"},{"code":"4001001","name":"饮食文化与旅游","nameEn":"Dietetic Culture and Tourism","category":"人文素养","unit":"文学文化","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4007007","name":"古典诗词欣赏","nameEn":"Appreciation of Classical Poetry","category":"人文素养","unit":"文学文化","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4007008","name":"红楼梦欣赏","nameEn":"Appreciation of The Dream of Red Mansions","category":"人文素养","unit":"文学文化","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4007009","name":"中国传统文化元素与设计","nameEn":"Chinese Traditional Cultural Elements and Design","category":"人文素养","unit":"文学文化","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4012018","name":"世界电影与流行文化","nameEn":"World Film and Popular Culture","category":"人文素养","unit":"文学文化","semester":"春、秋","credits":2,"hours":32,"dept":"外语院"},{"code":"4021042","name":"西方音乐史","nameEn":"History of Western Music","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4007043","name":"生活中的广告美学","nameEn":"Advertising Aesthetics in Life","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4007044","name":"俄罗斯艺术探秘","nameEn":"Exploring the Mysteries of Russian Art","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4007046","name":"文艺美学导论","nameEn":"Introduction to Aesthetics of Literature and Art","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4007047","name":"中国文人画传统","nameEn":"The Chinese Literati Painting Tradition","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4021012","name":"美学概论","nameEn":"An Introduction to Aesthetics","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021014","name":"东方古典建筑美学","nameEn":"Aesthetics of Oriental Classical Architecture","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021016","name":"文艺理论","nameEn":"Theory of Literature and Art","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4027003","name":"苏派旗袍礼仪美学","nameEn":"Su style qipao etiquette aesthetics","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4027004","name":"舞蹈鉴赏美学","nameEn":"Aesthetics of Dance Appreciation","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021037","name":"舞蹈艺术概论","nameEn":"Introduction to Dance Art","category":"人文素养","unit":"艺术审美（美学和艺术史论类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021041","name":"音乐中的生态智慧与审美体验","nameEn":"Ecological Wisdom and Aesthetic Experience in Music","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4015001","name":"音乐欣赏","nameEn":"Music Appreciation","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"轻工院"},{"code":"4015002","name":"色彩视觉与搭配","nameEn":"Color vision and collocation","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"轻工院"},{"code":"4007021","name":"书法欣赏","nameEn":"Chinese Calligraphy Appreciation","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4007022","name":"摄影艺术概论","nameEn":"Introduction to photography","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4007023","name":"影视鉴赏","nameEn":"Films and Television Appreciation","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4007039","name":"当代动漫作品欣赏","nameEn":"Appreciation of Contemporary Animation Works","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4012021","name":"亚洲电影史","nameEn":"Nostalgia for the “Light” and “Silhouette”: Asian Film History after 1949","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"外语院"},{"code":"4013008","name":"中国古典绘画作品鉴赏","nameEn":"Appreciation of Modern Art","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"艺术院"},{"code":"4013013","name":"摄影叙事工作坊","nameEn":"Photography Storytelling Workshop","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":2,"hours":32,"dept":"艺术院"},{"code":"4010008","name":"诗画草木：植物景观的文化审美","nameEn":"Poetry and Plants: Cultural Aesthetics of Vegetation Landscape","category":"人文素养","unit":"艺术审美（艺术鉴赏和评论类）","semester":"春、秋","credits":1,"hours":16,"dept":"园林院"},{"code":"4021020","name":"身体健康与美学工坊","nameEn":"Workshop on Physical Health and Aesthetics","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021021","name":"剑术理论实践赏析","nameEn":"Sword Arts: Theory, Practice, and Aesthetics","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":1,"hours":16,"dept":"体美部"},{"code":"4021004","name":"拉丁舞艺术鉴赏与实践","nameEn":"Art Appreciation and Practice of Latin Dance","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021009","name":"时尚排舞赏析与实践","nameEn":"Appreciation and Practice of Fashion Line Dancing","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021019","name":"龙狮舞艺术与审美实践","nameEn":"The Art and Aesthetic Practice of Dragon and Lion Dance","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021011","name":"艺术体操欣赏与实践","nameEn":"Appreciation and Practice of Rhythmic Gymnastics","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021023","name":"流行舞蹈赏析与实践","nameEn":"Appreciation and Practice of Popular Dance","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021027","name":"古风剑舞实践与赏析","nameEn":"Practice and Appreciation of Ancient Chinese Sword Dance","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021028","name":"T台走秀与体态养成","nameEn":"Catwalk and Posture Cultivation","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021039","name":"表演创作（1）","nameEn":"Performance Creation(1)","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"4021040","name":"声音剧场：有声语言艺术表达","nameEn":"Sound Theatre — The Art of Vocal_x001e_Language Expression","category":"人文素养","unit":"艺术审美（艺术体验和实践类）","semester":"春、秋","credits":2,"hours":32,"dept":"体美部"},{"code":"C4014001","name":"竹家具赏析与创新","nameEn":"Appreciation and innovation of bamboo furniture","category":"社会认知","unit":"创新创业","semester":"春、秋","credits":2,"hours":32,"dept":"家居院"},{"code":"C4005003","name":"人工智能与未来","nameEn":"Artifical Intelligence and the Future","category":"社会认知","unit":"创新创业","semester":"春、秋","credits":2,"hours":32,"dept":"经管院"},{"code":"C4005004","name":"互联网创新创业思维与实践","nameEn":"Internet Innovation and Entrepreneurial Theory and Practice","category":"社会认知","unit":"创新创业","semester":"春、秋","credits":2,"hours":32,"dept":"经管院"},{"code":"C4001001","name":"茶文化和茶工艺创新","nameEn":"Tea culture and tea technology innovation","category":"社会认知","unit":"创新创业","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"C4001002","name":"智慧林业创新思路与实践探索","nameEn":"Innovative Ideas and Practical Exploration of Smart Forestry","category":"社会认知","unit":"创新创业","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"C4031007","name":"批判性思维","nameEn":"Critical Thinking","category":"社会认知","unit":"创新创业","semester":"春、秋","credits":2,"hours":32,"dept":"马院"},{"code":"4016005","name":"交通与人类文明","nameEn":"Transportation and Human Civilization","category":"社会认知","unit":"社会发展","semester":"春、秋","credits":1,"hours":16,"dept":"交通院"},{"code":"4016009","name":"车险解码：风险管理与保障策略","nameEn":"Decoding Auto Insurance: Risk Management and Protection Strategies","category":"社会认知","unit":"社会发展","semester":"春、秋","credits":1,"hours":16,"dept":"交通院"},{"code":"4005019","name":"生活中会计学常识","nameEn":"Life Accounting Knowledge","category":"社会认知","unit":"社会发展","semester":"春、秋","credits":2,"hours":32,"dept":"经管院"},{"code":"4007025","name":"广告创意与策划","nameEn":"Advertising Creativity and Planning","category":"社会认知","unit":"社会发展","semester":"春、秋","credits":2,"hours":32,"dept":"人文院"},{"code":"4017033","name":"健康饮食与活力运动","nameEn":"Wellness Through Diet and Exercise","category":"社会认知","unit":"社会发展","semester":"春、秋","credits":2,"hours":32,"dept":"生环院"},{"code":"4005013","name":"工程经济管理概论","nameEn":"Introduction to project management","category":"社会认知","unit":"组织管理","semester":"春、秋","credits":1,"hours":20,"dept":"经管院"},{"code":"4016010","name":"汽车概论","nameEn":"Introduction to Automobile","category":"科学精神","unit":"工程技术","semester":"春、秋","credits":1,"hours":16,"dept":"交通院"},{"code":"4001003","name":"现代生物技术","nameEn":"Modern Biotechnology","category":"科学精神","unit":"科技前沿","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4003003","name":"人工智能伦理","nameEn":"Artificial Intelligence Ethics","category":"科学精神","unit":"数理逻辑","semester":"春、秋","credits":2,"hours":32,"dept":"机电院"},{"code":"4006014","name":"工程伦理","nameEn":"Engineering Ethics","category":"科学精神","unit":"数理逻辑","semester":"春、秋","credits":2,"hours":32,"dept":"土木院"},{"code":"4005018","name":"灰色系统的奥秘：思维、建模及应用","nameEn":"The Mystery of Grey System: Thinking, Modeling, and Applications","category":"科学精神","unit":"数理逻辑","semester":"春、秋","credits":2,"hours":32,"dept":"经管院"},{"code":"4011005","name":"数学模型及其应用","nameEn":"The mathematical model and its application","category":"科学精神","unit":"数理逻辑","semester":"春、秋","credits":2,"hours":32,"dept":"理学院"},{"code":"4008008","name":"二级Office 强化训练","nameEn":"Secondary Office Reinforcement Training","category":"科学精神","unit":"数理逻辑","semester":"春、秋","credits":2,"hours":32,"dept":"信智院"},{"code":"4003007","name":"数据伦理","nameEn":"Data Ethics","category":"科学精神","unit":"自然探索","semester":"春、秋","credits":2,"hours":32,"dept":"机电院"},{"code":"4001006","name":"转基因植物导论","nameEn":"General course of transgenic plants","category":"科学精神","unit":"自然探索","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4001012","name":"遗传学基础","nameEn":"Genetic basis","category":"科学精神","unit":"自然探索","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4001019","name":"基因与健康","nameEn":"Genes and Health","category":"科学精神","unit":"自然探索","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"},{"code":"4018003","name":"动物与人类","nameEn":"Animal appreciation and conservation","category":"科学精神","unit":"自然探索","semester":"春、秋","credits":2,"hours":32,"dept":"生科院"},{"code":"4018004","name":"神奇动物在做啥","nameEn":"Fantastic beasts and what they do","category":"科学精神","unit":"自然探索","semester":"春、秋","credits":2,"hours":32,"dept":"生科院"},{"code":"4018007","name":"生命起源","nameEn":"The Origin of Life","category":"科学精神","unit":"自然探索","semester":"春、秋","credits":2,"hours":32,"dept":"生科院"},{"code":"4018008","name":"生命进化与生物多样性","nameEn":"Evolution","category":"科学精神","unit":"自然探索","semester":"春、秋","credits":2,"hours":32,"dept":"生科院"},{"code":"4001023","name":"茶学通识","nameEn":"Tea science introduction","category":"绿色文明","unit":"资源环境","semester":"春、秋","credits":2,"hours":32,"dept":"林草院"}]}</script>
 <script id="initialChains" type="application/json">{"green":["4001010","4001011","4001016","4001017","4001018","4001023","4005017","4007032","4014002","4014007","4014012","4015005","4017011","4017012","4017015","4017022","4017023","4017024","4018020","4010010","4017035","4017036","4028002"],"innov":["C4001001","C4001002","C4005003","C4005004","C4014001","C4031007"],"art":["4007021","4007022","4007023","4007039","4007043","4007044","4007046","4007047","4012021","4013008","4013013","4015001","4015002","4021012","4021014","4021016","4021037","4021041","4021042","4027003","4027004","4010008"]}</script>
 <script>
-const CATALOG = JSON.parse(document.getElementById('catalogData').textContent);
+'use strict';
 
-// 三个类别：rule 用来说明"这门课凭什么算这个类别"，与生成脚本保持一致
+const CATALOG = JSON.parse(document.getElementById('catalogData').textContent);
+const COURSES = CATALOG.courses;
+const byCode = new Map(COURSES.map(c => [c.code, c]));
+
+// ── 三个类别 ────────────────────────────────────────────────
+// accepts 决定"这门课能否计入该类别"，与 tools/build-ggxxk-config.mjs 保持一致。
 const BUCKETS = [
-  { id:'green', label:'绿色文明', need:2,
+  { id:'green', label:'绿色文明', need:2, color:'#3ddc97',
     rule:'类别 = 绿色文明',
     accepts: c => c.category === '绿色文明' },
-  { id:'innov', label:'创新创业', need:2,
+  { id:'innov', label:'创新创业', need:2, color:'#f2b544',
     rule:'课程单元 = 创新创业',
     accepts: c => c.unit === '创新创业' },
-  { id:'art', label:'艺术审美', need:2,
+  { id:'art', label:'艺术审美', need:2, color:'#b98bff',
     rule:'课程单元 = 美学和艺术史论类 或 艺术鉴赏和评论类',
     accepts: c => c.unit === '艺术审美（美学和艺术史论类）' || c.unit === '艺术审美（艺术鉴赏和评论类）' },
 ];
+const BK_BY_ID = new Map(BUCKETS.map(b => [b.id, b]));
 
-const INITIAL_CHAINS = (() => {
+const INITIAL = (() => {
   try { return JSON.parse(document.getElementById('initialChains').textContent); }
-  catch { return { green: [], innov: [], art: [] }; }
+  catch { return { green:[], innov:[], art:[] }; }
 })();
 
 const state = {
-  earned: { green:0, innov:0, art:0 },   // 已修学分
-  chains: JSON.parse(JSON.stringify(INITIAL_CHAINS)),// 有序的课程代码
+  earned: { green:0, innov:0, art:0 },
+  chains: { green:[], innov:[], art:[] },
+  filter: 'all',      // all | green | innov | art | other
+  q: '',
+  expanded: { green:false, innov:false, art:false },
 };
 
-const courses = CATALOG.courses;
-const byCode = new Map(courses.map(c => [c.code, c]));
+// 候选链默认只展开前几门：三个类别要一眼能同时看到，
+// 二十几门全铺开会把后面的类别挤到屏幕外。
+const COLLAPSE_AT = 3;
+for (const b of BUCKETS) state.chains[b.id] = [...(INITIAL[b.id] || [])];
 
-// ── 课程库渲染 ─────────────────────────────────────────────
-const poolEl = document.getElementById('pool');
-const searchEl = document.getElementById('search');
-const catEl = document.getElementById('catFilter');
+// ── 工具 ────────────────────────────────────────────────────
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const bucketOf = c => BUCKETS.find(b => b.accepts(c)) || null;
+const creditsOf = code => byCode.get(code)?.credits || 0;
+const chainCredits = bid => state.chains[bid].reduce((s, c) => s + creditsOf(c), 0);
+const compact = n => n >= 10000 ? (n/10000).toFixed(1)+'万' : String(n);
 
-document.getElementById('poolCount').textContent = courses.length + ' 门';
-document.getElementById('catalogNote').textContent =
-  (CATALOG.note || '') + '　来源：' + (CATALOG.source || '');
+function toast(msg){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), 1800);
+}
 
-const cats = [...new Set(courses.map(c => c.category))];
-catEl.innerHTML = '<option value="">全部类别</option>' +
-  cats.map(c => `<option value="${c}">${c}</option>`).join('');
+// ── 顶部指标 ────────────────────────────────────────────────
+function renderMeters(){
+  $('#meters').innerHTML = BUCKETS.map(b => {
+    const got = state.earned[b.id] || 0;
+    const need = Math.max(0, b.need - got);
+    const planned = chainCredits(b.id);
+    const n = state.chains[b.id].length;
+    const ready = need === 0 || planned >= need;
+    const pct = need === 0 ? 100 : Math.min(100, planned / need * 100);
+    const txt = need === 0 ? '已修满' : ready ? `${n} 门` : `缺 ${need - planned} 分`;
+    const cls = ready ? ' done' : ' lack';
+    return `<div class="meter${cls}" data-jump="${b.id}" style="--c:${b.color}" title="${b.label}：需 ${need} 学分，候选 ${n} 门共 ${planned} 学分">
+      <div class="top">
+        <span class="dot"></span>
+        <span class="lbl">${b.label}</span>
+        <span class="num">${txt}</span>
+      </div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+    </div>`;
+  }).join('');
+  $('#meters').querySelectorAll('[data-jump]').forEach(el => {
+    el.onclick = () => {
+      const t = document.querySelector(`[data-bkt="${el.dataset.jump}"]`);
+      if (t) t.scrollIntoView({ behavior:'smooth', block:'center' });
+    };
+  });
+}
 
-function renderPool(){
-  const q = searchEl.value.trim().toLowerCase();
-  const cat = catEl.value;
-  const list = courses.filter(c => {
-    if (cat && c.category !== cat) return false;
+// ── 课程库 ──────────────────────────────────────────────────
+const FILTERS = [
+  { id:'all',   label:'全部' },
+  { id:'green', label:'绿色文明', color:'#3ddc97', test: c => c.category === '绿色文明' },
+  { id:'innov', label:'创新创业', color:'#f2b544', test: c => c.unit === '创新创业' },
+  { id:'art',   label:'艺术审美', color:'#b98bff', test: c => BUCKETS[2].accepts(c) },
+  { id:'other', label:'不计学分' },
+];
+
+function poolPool(){
+  const f = FILTERS.find(x => x.id === state.filter) || FILTERS[0];
+  const q = state.q.toLowerCase();
+  return COURSES.filter(c => {
+    if (f.test) { if (!f.test(c)) return false; }
+    else if (f.id === 'all') { if (!bucketOf(c)) return false; }
+    else if (f.id === 'other') { if (bucketOf(c)) return false; }
     if (!q) return true;
     return [c.name, c.code, c.category, c.unit, c.dept, c.nameEn].join(' ').toLowerCase().includes(q);
   });
-  poolEl.innerHTML = list.slice(0, 200).map(c => {
-    const btns = BUCKETS.map(b => {
-      const okc = b.accepts(c);
-      return `<button data-add="${b.id}" data-code="${c.code}" title="${okc ? '加入' : '不属于该类别（仍可强制加入）'}">+ ${b.label}${okc ? '' : '?'}</button>`;
-    }).join('');
-    return `<div class="course">
-      <div class="meta">
-        <div class="name" title="${esc(c.name)}">${esc(c.name)}</div>
-        <div class="tags"><span class="code">${c.code}</span><span>${c.credits} 学分</span>
-          <span>${esc(c.category)}</span><span>${esc(c.unit)}</span><span>${esc(c.dept)}</span></div>
-      </div>
-      ${btns}
-    </div>`;
-  }).join('') || '<div class="empty">没有匹配的课程</div>';
 }
 
-poolEl.addEventListener('click', e => {
-  const btn = e.target.closest('button[data-add]');
-  if (!btn) return;
-  const code = btn.dataset.code;
-  const bid = btn.dataset.add;
-  const chain = state.chains[bid];
-  if (chain.includes(code)) return;
-  chain.push(code);
-  renderBuckets();
+function renderChips(){
+  const base = COURSES;
+  const counts = {
+    all: base.filter(c => bucketOf(c)).length,
+    green: base.filter(c => c.category === '绿色文明').length,
+    innov: base.filter(c => c.unit === '创新创业').length,
+    art: base.filter(c => BUCKETS[2].accepts(c)).length,
+    other: base.filter(c => !bucketOf(c)).length,
+  };
+  $('#chips').innerHTML = FILTERS.map(f => {
+    const on = state.filter === f.id ? ' on' : '';
+    const dot = f.color ? `<span class="d" style="--c:${f.color}"></span>` : '';
+    return `<button class="chip${on}" data-f="${f.id}" ${f.color ? `style="--c:${f.color}"` : ''}>
+      ${dot}${f.label}<span class="n">${counts[f.id]}</span>
+    </button>`;
+  }).join('');
+  $('#chips').querySelectorAll('[data-f]').forEach(el => {
+    el.onclick = () => { state.filter = el.dataset.f; renderChips(); renderPool(); };
+  });
+}
+
+// 某门课当前被放进了哪个桶（用于显示序号 / 已选态）
+function placement(code){
+  for (const b of BUCKETS) {
+    const i = state.chains[b.id].indexOf(code);
+    if (i >= 0) return { b, i };
+  }
+  return null;
+}
+
+function renderPool(){
+  const list = poolPool();
+  $('#poolCount').textContent = list.length + ' 门';
+
+  if (!list.length) {
+    $('#pool').innerHTML = `<div class="empty">
+      <div>没有匹配的课程</div>
+      <div style="font-size:11.5px">试试换个关键词，或切到「其他」看看不属于目标的课</div>
+    </div>`;
+    return;
+  }
+
+  const shown = list.slice(0, 300);
+  $('#pool').innerHTML = shown.map(c => {
+    const b = bucketOf(c);
+    const put = placement(c.code);
+    const color = b ? b.color : 'rgba(255,255,255,.2)';
+    const tag = b
+      ? `<span class="tag" style="--c:${b.color}"><span class="d"></span>${b.label}</span>`
+      : `<span class="tag" style="--c:rgba(255,255,255,.25)"><span class="d"></span>不计学分</span>`;
+    return `<div class="course${put ? ' in' : ''}${b ? '' : ' muted'}" data-code="${c.code}" style="--c:${color}">
+      <div class="body">
+        <div class="nm"><b title="${esc(c.name)}">${esc(c.name)}</b></div>
+        <div class="sub">
+          <span class="code">${esc(c.code)}</span>
+          <span class="sep">·</span>
+          ${tag}
+          <span class="sep">·</span>
+          <span>${esc(c.dept || '')}</span>
+        </div>
+      </div>
+      <span class="cr">${c.credits} 分</span>
+      ${put
+        ? `<span class="badge" title="已在「${put.b.label}」候选第 ${put.i+1} 位，点击移出"><svg viewBox="0 0 12 12"><path d="M2 6.3l2.6 2.6L10 3.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
+        : `<button class="addbtn" data-add="${c.code}" title="加入方案">
+             <svg viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" stroke-linecap="round"/></svg>
+           </button>`}
+    </div>`;
+  }).join('');
+}
+
+// 左栏点击：交给事件冒泡处理
+$('#pool').addEventListener('click', e => {
+  const btn = e.target.closest('[data-add]');
+  const row = e.target.closest('[data-code]');
+  const code = btn ? btn.dataset.add : row?.dataset.code;
+  if (!code) return;
+  const c = byCode.get(code);
+  if (!c) return;
+
+  const put = placement(code);
+  if (put) {  // 已在方案里 → 移除（点击即切换，符合直觉）
+    state.chains[put.b.id].splice(put.i, 1);
+    toast(`已从「${put.b.label}」移除 ${c.name}`);
+  } else {
+    const b = bucketOf(c);
+    if (!b) {
+      const pick = askBucket(c);
+      if (!pick) return;
+      state.chains[pick].push(code);
+      toast(`已加入「${BK_BY_ID.get(pick).label}」——注意这门课不算该类学分`);
+    } else {
+      state.chains[b.id].push(code);
+      toast(`已加入「${b.label}」：${c.name}`);
+    }
+  }
+  render();
 });
 
-// ── 类别卡片渲染 ───────────────────────────────────────────
-const bucketsEl = document.getElementById('buckets');
-
-function creditsIn(bid){
-  return state.chains[bid].reduce((s, code) => s + (byCode.get(code)?.credits || 0), 0);
+// 不属于任何目标类别的课：强制加入时让用户选桶
+function askBucket(c){
+  const names = BUCKETS.map((b, i) => `${i+1}. ${b.label}`).join('\n');
+  const pick = prompt(`「${c.name}」不属于任何目标类别。\n强行加入只能占用候选位、抢到也不算该类学分。\n\n加入哪个类别？\n${names}\n\n输入 1-3，取消则不加入。`);
+  const i = Number(pick) - 1;
+  return Number.isInteger(i) && i >= 0 && i < BUCKETS.length ? BUCKETS[i].id : null;
 }
 
+// ── 方案面板 ────────────────────────────────────────────────
 function renderBuckets(){
-  bucketsEl.innerHTML = BUCKETS.map(b => {
+  $('#buckets').innerHTML = BUCKETS.map(b => {
     const chain = state.chains[b.id];
     const got = state.earned[b.id] || 0;
     const need = Math.max(0, b.need - got);
-    const has = creditsIn(b.id);
-    const done = has >= need;
-    const cls = need === 0 ? 'need-ok' : done ? 'need-ok' : 'need-warn';
-    const items = chain.map((code, i) => {
-      const c = byCode.get(code) || { name: '(未知课程)', credits: 0, code };
-      const miss = b.accepts(c) ? '' : ' <span class="bad" title="这门课不属于该类别">⚠</span>';
-      return `<div class="item">
-        <span class="idx">${i + 1}</span>
-        <div class="meta" style="flex:1;min-width:0">
-          <div class="name">${esc(c.name)}${miss}</div>
-          <div class="tags"><span class="code">${c.code}</span><span>${c.credits} 学分</span><span>${esc(c.unit||'')}</span></div>
-        </div>
-        <button data-move="up" data-b="${b.id}" data-i="${i}" ${i===0?'disabled':''}>↑</button>
-        <button data-move="down" data-b="${b.id}" data-i="${i}" ${i===chain.length-1?'disabled':''}>↓</button>
-        <button data-del="${b.id}" data-i="${i}">✕</button>
-      </div>`;
-    }).join('') || '<div class="empty">还没有候选 —— 从左边课程库加入，或直接让脚本按类别批量填充</div>';
+    const planned = chainCredits(b.id);
+    const done = need === 0 || planned >= need;
+    const pct = need === 0 ? 100 : Math.min(100, planned / need * 100);
+    const shortfall = Math.max(0, need - planned);
+    const expanded = Boolean(state.expanded[b.id]);
+    const visible = expanded ? chain : chain.slice(0, COLLAPSE_AT);
+    const hidden = chain.length - visible.length;
 
-    return `<div class="bucket">
-      <div class="head">
-        <h2>${b.label}</h2>
-        <span class="need">要求 <b>${b.need}</b> 学分 ｜ 已修
-          <input type="number" min="0" max="10" step="1" value="${got}" data-earned="${b.id}"
-            style="width:52px;display:inline-block;padding:2px 6px">学分 ｜ 还需
-          <b class="${cls}">${need}</b> 学分 · 已排 <b class="${cls}">${has}</b></span>
+    const slots = visible.map((code, i) => {
+      const c = byCode.get(code) || { name:'(未知课程)', credits:0, unit:'', code };
+      const wrong = !b.accepts(c);
+      return `<div class="slot" draggable="true" data-b="${b.id}" data-i="${i}" data-code="${esc(code)}">
+        <span class="grip" title="拖动排序">
+          <svg viewBox="0 0 10 14"><circle cx="2" cy="2" r="1.2"/><circle cx="8" cy="2" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="8" cy="7" r="1.2"/><circle cx="2" cy="12" r="1.2"/><circle cx="8" cy="12" r="1.2"/></svg>
+        </span>
+        <span class="idx">${i+1}</span>
+        <div class="body">
+          <div class="nm" title="${esc(c.name)}">${esc(c.name)}</div>
+          <div class="sub">
+            <span class="code">${esc(c.code)}</span>
+            <span>${c.credits} 分</span>
+            ${wrong ? '<span class="warn">⚠ 不属于该类</span>' : ''}
+          </div>
+        </div>
+        <button class="del" data-del="${b.id}" data-i="${i}" title="移出">
+          <svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke-linecap="round"/></svg>
+        </button>
+      </div>`;
+    }).join('');
+
+    return `<div class="bkt" data-bkt="${b.id}" style="--c:${b.color}">
+      <div class="bkt-head">
+        <span class="dot"></span>
+        <h3>${b.label}</h3>
+        <span class="st${done ? ' ok' : ''}">${done ? '✔ 已满足' : `还差 ${shortfall} 分`}</span>
       </div>
-      <div class="rule">${b.rule}</div>
-      <div class="chain">${items}</div>
+      <div class="bkt-meta">
+        <span class="rule" title="${b.rule}">${b.rule}</span>
+        ${hidden > 0 ? `<button class="more" data-more="${b.id}" title="展开全部 ${chain.length} 门备选">还有 ${hidden} 门</button>` : ''}
+        ${expanded && chain.length > COLLAPSE_AT ? `<button class="more" data-more="${b.id}">收起</button>` : ''}
+        <div class="stepper" title="该类已修学分 —— 程序只补差额">
+          <button data-earned="${b.id}" data-d="-1">−</button>
+          <span class="v">已修 <b>${got}</b></span>
+          <button data-earned="${b.id}" data-d="1">+</button>
+        </div>
+      </div>
+      <div class="slots" data-b="${b.id}">
+        ${slots || `<div class="no-slot">还没有候选 —— 从左侧课程库点选加入</div>`}
+      </div>
     </div>`;
   }).join('');
 
-  bucketsEl.querySelectorAll('button[data-del]').forEach(btn => {
-    btn.onclick = () => { state.chains[btn.dataset.del].splice(Number(btn.dataset.i), 1); renderBuckets(); };
-  });
-  bucketsEl.querySelectorAll('button[data-move]').forEach(btn => {
+  $('#planCount').textContent = BUCKETS.reduce((s, b) => s + state.chains[b.id].length, 0) + ' 门';
+
+  $('#buckets').querySelectorAll('[data-del]').forEach(btn => {
     btn.onclick = () => {
-      const arr = state.chains[btn.dataset.b];
-      const i = Number(btn.dataset.i);
-      const j = btn.dataset.move === 'up' ? i - 1 : i + 1;
-      if (j < 0 || j >= arr.length) return;
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-      renderBuckets();
+      state.chains[btn.dataset.del].splice(Number(btn.dataset.i), 1);
+      render();
     };
   });
-  bucketsEl.querySelectorAll('input[data-earned]').forEach(inp => {
-    inp.onchange = () => { state.earned[inp.dataset.earned] = Math.max(0, Number(inp.value) || 0); renderBuckets(); };
+  $('#buckets').querySelectorAll('[data-earned]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.earned;
+      const v = (state.earned[id] || 0) + Number(btn.dataset.d);
+      state.earned[id] = Math.max(0, Math.min(10, v));
+      render();
+    };
   });
-
-  renderStat();
+  $('#buckets').querySelectorAll('[data-more]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.more;
+      state.expanded[id] = !state.expanded[id];
+      render();
+    };
+  });
 }
 
-function renderStat(){
-  const lines = [];
-  let problems = 0;
-  for (const b of BUCKETS) {
-    const got = state.earned[b.id] || 0;
-    const need = Math.max(0, b.need - got);
-    const have = creditsIn(b.id);
-    if (need === 0) { lines.push(`<span class="ok">✔ ${b.label}：已修满，无需再抢</span>`); continue; }
-    if (have < need) { problems++; lines.push(`<span class="bad">✖ ${b.label}：还差 ${need} 学分，但候选只够 ${have} 学分</span>`); }
-    else lines.push(`<span class="ok">✔ ${b.label}：需 ${need} 学分，候选 ${state.chains[b.id].length} 门共 ${have} 学分</span>`);
+// ── 拖拽排序（同桶内 + 跨桶）────────────────────────────────
+let drag = null;
+
+$('#buckets').addEventListener('dragstart', e => {
+  const slot = e.target.closest('.slot');
+  if (!slot) return;
+  drag = { b: slot.dataset.b, code: slot.dataset.code };
+  slot.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', slot.dataset.code);
+});
+$('#buckets').addEventListener('dragend', () => {
+  drag = null;
+  $('#buckets').querySelectorAll('.dragging,.drop-target,.drop').forEach(n =>
+    n.classList.remove('dragging','drop-target','drop'));
+});
+$('#buckets').addEventListener('dragover', e => {
+  if (!drag) return;
+  const slot = e.target.closest('.slot');
+  const list = e.target.closest('.slots');
+  if (!slot && !list) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  $('#buckets').querySelectorAll('.drop-target,.drop').forEach(n => n.classList.remove('drop-target','drop'));
+  (slot || list).classList.add(slot ? 'drop-target' : 'drop');
+});
+$('#buckets').addEventListener('drop', e => {
+  if (!drag) return;
+  e.preventDefault();
+  const slot = e.target.closest('.slot');
+  const list = e.target.closest('.slots');
+  const to = slot ? slot.dataset.b : list?.dataset.b;
+  if (!to) return;
+  if (slot && slot.dataset.code === drag.code) return;
+
+  const src = state.chains[drag.b];
+  const i = src.indexOf(drag.code);
+  if (i >= 0) src.splice(i, 1);
+  const dst = state.chains[to];
+  if (slot) {
+    const at = dst.indexOf(slot.dataset.code);
+    dst.splice(at < 0 ? dst.length : at, 0, drag.code);
+  } else {
+    dst.push(drag.code);
   }
-  const wrong = BUCKETS.flatMap(b => state.chains[b.id]
-    .filter(code => !b.accepts(byCode.get(code)))
-    .map(code => `${byCode.get(code)?.name || code}（放进了 ${b.label}）`));
-  if (wrong.length) lines.push(`<span class="warn">⚠ 类别不符：${wrong.join('、')} —— 抢到也可能不算该类学分</span>`);
-  lines.push(`<span style="color:var(--dim)">共 ${Object.values(state.chains).reduce((s,a)=>s+a.length,0)} 个候选，0 个表示该类别不会再抢</span>`);
-  document.getElementById('stat').innerHTML = lines.join('<br>');
-  return problems;
-}
+  drag = null;
+  render();
+});
 
-// ── 导出 ───────────────────────────────────────────────────
+// ── 预览 / 保存 ─────────────────────────────────────────────
 function buildConfig(){
   const targets = [];
   const buckets = [];
@@ -279,45 +866,97 @@ function buildConfig(){
     term: { xnm:'2026', xqm:'3' },
     auth: { entry:'ehall', username:'${NJFU_USER}', password:'${NJFU_PASS}',
             mode:'autofill', pauseOnCaptcha:true, sessionFile:'state/session.json' },
-    _note: '由 tools/config-ui.html 生成。targets 里的 _name/_credits 只是注释，程序不读。',
+    _note: '由 tools/config-ui.html 生成。targets 里的 _name 只是注释，程序不读。',
     buckets,
     targets,
     strategy: { stopAfterSuccess:false, maxAttemptsPerTarget:0, fullFallbackAfterSec:0 },
     schedule: {
-      startAt: document.getElementById('startAt').value.trim() || undefined,
+      startAt: $('#startAt').value.trim() || undefined,
       prewarmSec:120, highFreqBeforeSec:30, highFreqIntervalMs:400, intervalMs:2500, maxRunMinutes:120,
     },
     net: { proxy:null, concurrency:1, connectTimeoutMs:5000, readTimeoutMs:20000, maxRetries:6,
            maxRedirects:20, backoff:{ baseMs:1500, factor:1.6, maxMs:15000, jitter:0.3 },
            ipv4First:true, rejectUnauthorized:true },
-    safety: { dryRun: document.getElementById('dry').checked, maxSubmitsPerMinute:6 },
+    safety: { dryRun: $('#dry').checked, maxSubmitsPerMinute:6 },
   };
 }
 
-document.getElementById('btnPreview').onclick = () => {
-  const pre = document.getElementById('preview');
-  const show = pre.style.display === 'none';
-  pre.textContent = JSON.stringify(buildConfig(), null, 2);
-  pre.style.display = show ? 'block' : 'none';
-};
+function openModal(title, body){
+  $('#modalTitle').textContent = title;
+  $('#modalBody').textContent = body;
+  $('#modal').classList.add('show');
+}
 
-document.getElementById('btnSave').onclick = () => {
-  const bad = renderStat();
-  if (bad > 0 && !confirm('有类别凑不够学分，仍要保存吗？')) return;
+$('#btnPreview').onclick = () => openModal('配置预览', JSON.stringify(buildConfig(), null, 2));
+$('#modalClose').onclick = () => $('#modal').classList.remove('show');
+$('#modal').onclick = e => { if (e.target.id === 'modal') $('#modal').classList.remove('show'); };
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') $('#modal').classList.remove('show');
+});
+
+$('#btnSave').onclick = () => {
+  const short = BUCKETS.filter(b => {
+    const need = Math.max(0, b.need - (state.earned[b.id] || 0));
+    return need > 0 && chainCredits(b.id) < need;
+  });
+  if (short.length && !confirm(
+    `以下类别候选学分不够，抢到的可能性很低：\n\n` +
+    short.map(b => `· ${b.label}：需要 ${b.need - (state.earned[b.id]||0)} 分，候选只排了 ${chainCredits(b.id)} 分`).join('\n') +
+    `\n\n仍然保存吗？`)) return;
+
   const blob = new Blob([JSON.stringify(buildConfig(), null, 2) + '\n'], { type:'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'config.ggxxk.json';
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('已保存 config.ggxxk.json —— 放到项目根目录');
 };
 
-function esc(s){ return String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+// ── 其它控件 ────────────────────────────────────────────────
+$('#search').addEventListener('input', e => { state.q = e.target.value.trim(); renderPool(); });
+$('#btnClearSearch').onclick = () => { $('#search').value = ''; state.q = ''; renderPool(); $('#search').focus(); };
 
-renderPool();
-searchEl.oninput = renderPool;
-catEl.onchange = renderPool;
-renderBuckets();
+$('#btnReset').onclick = () => {
+  for (const b of BUCKETS) state.chains[b.id] = [...(INITIAL[b.id] || [])];
+  render();
+  toast('已恢复推荐方案（全部候选，2 学分优先）');
+};
+$('#btnClearAll').onclick = () => {
+  if (!confirm('清空三个类别的全部候选？')) return;
+  for (const b of BUCKETS) state.chains[b.id] = [];
+  render();
+};
+
+$('#btnHint').onclick = () => openModal('怎么用', HINT);
+
+const HINT = `这个页面不连服务器，改完只会下载一个 config.ggxxk.json。
+
+1. 左边是课程库（学校官方课表里开课学期带「秋」的 90 门）。
+   点课程卡片即可加入方案；再点一次移出。
+   卡片左边的色条表示它属于哪个类别，灰色的「不计学分」课需要手动指定类别。
+
+2. 右边每个类别是一条「候选链」：
+   程序按 1、2、3 的顺序往下试，前一门满员才试下一门。
+   拖动可以调顺序，这决定了你最想上哪门。
+
+3. 顶部「已修 / 需」和每个类别的「已修」步进器：
+   如果你这个类别已经修够学分，把它调上去，程序会自动跳过该类，不再做无用功。
+
+4. 保存后把 config.ggxxk.json 放到项目根目录，运行：
+     node src/cli.js doctor --config config.ggxxk.json
+     node src/cli.js run   --config config.ggxxk.json        # 干跑
+     node src/cli.js run   --config config.ggxxk.json --live  # 实跑
+
+注意：课程库没有容量、教师、上课时间，这些只有选课系统实时返回。
+所以候选链排得越长，抢到概率越高——但抢到的课是真要上一学期的，
+把不能接受的删掉。`;
+
+// ── 启动 ────────────────────────────────────────────────────
+function render(){ renderMeters(); renderPool(); renderBuckets(); }
+
+renderChips();
+render();
 </script>
 </body>
 </html>
