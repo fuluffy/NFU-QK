@@ -378,113 +378,37 @@ async function cmdRun(args) {
   const { path: cfgPath, config } = await loadConfig(args.config);
   const profileName = args.profile ?? config.profile ?? 'pe';
   const profile = await loadProfile(profileName);
-  const dryRun = args.live ? false : true;
+  const live = Boolean(args.live);
 
   logger.info('═══ 真实环境运行 ═══');
   logger.info(`配置：${cfgPath}`);
-  logger.info(`profile：${profileName}（${profile.label ?? ''}）｜模式：${dryRun ? '干跑（不会提交）' : '实跑（会真的选课！）'}`);
 
-  if (String(profile._status ?? '').startsWith('ASSUMED') && !args.force) {
-    logger.error('该 profile 仍标记为 ASSUMED（端点与字段均为推断值），尚未经过真机取证。');
-    logger.error('直接运行只会得到一堆 404，并给学校服务器制造无意义的请求。');
-    logger.error('请先完成 Phase 1 取证（见 docs/接口取证指南.md），把真实接口回填到 profile 后再运行。');
-    logger.error('确实要强行试跑请加 --force（干跑加 --force 同样会被拒绝）。');
-    return 2;
+  const net = config.net ?? {};
+  if (net.rejectUnauthorized === false) {
+    logger.warn('⚠ 已关闭 TLS 证书校验（net.rejectUnauthorized=false）。');
+    logger.warn('  风险：校网内理论上存在中间人可能。');
   }
 
-  if (profile._status && !String(profile._status).startsWith('VERIFIED')) {
-    logger.warn(`⚠️ profile 状态：${profile._status}`);
-    logger.warn('   它有依据，但没对当前学期验证过。实跑时盯住列表条数——若为 0 条，大概率是端点或字段已变。');
-  }
-
-  // 会话：Phase 1 由浏览器登录产生；此处只做加载与校验
-  const sessionFile = config.auth?.sessionFile ?? 'state/session.json';
-  let jar = new CookieJar();
+  const { runOnce, ConfigError } = await import('./flow/run-once.js');
   try {
-    const saved = await readJson(path.resolve(ROOT, sessionFile));
-    jar = CookieJar.fromJSON(saved);
-    logger.info(`已载入会话：${jar.size} 个 Cookie`);
+    const out = await runOnce({
+      config: { ...config, profile: profileName },
+      profile,
+      live,
+      logger,
+      root: ROOT,
+      force: Boolean(args.force),
+    });
+    return out.outcome === 'success' || out.outcome === 'dry-run' ? 0 : 1;
   } catch (err) {
-    if (err.code === 'ENOENT') {
-      logger.error(`找不到会话文件 ${sessionFile}，请先执行：node src/cli.js login`);
+    if (err instanceof ConfigError) {
+      logger.error(err.message);
+      if (err.code === 'NO_SESSION') logger.error('请先执行：node src/cli.js login');
+      if (err.code === 'PROFILE_ASSUMED') logger.error('确实要强行试跑请加 --force（干跑加 --force 同样会被拒绝）。');
       return 2;
     }
     throw err;
   }
-
-  if (!jar.has('JSESSIONID')) {
-    logger.warn('会话中没有 JSESSIONID，几乎肯定是未登录状态');
-  }
-  // 卷性路由 Cookie 的名字随版本变化：旧版 route，2026-11 起为 SERVERID。
-  // 只要有一个能在，会话就能被钉在同一台后端上。
-  if (!jar.has('route') && !jar.has('SERVERID')) {
-    logger.warn('会话中没有 route / SERVERID —— 正方是粘性会话，缺它会导致会话随机失效');
-  }
-
-  const net = config.net ?? {};
-  if (net.ipv4First !== false) applyIpv4First();
-
-  const rejectUnauthorized = net.rejectUnauthorized ?? true;
-  if (!rejectUnauthorized) {
-    logger.warn('⚠ 已关闭 TLS 证书校验（net.rejectUnauthorized=false）。');
-    logger.warn('  南林教务系统证书 *.njfu.edu.cn 已于 2025-03-04 过期 562 天，不关闭会导致全部请求失败。');
-    logger.warn('  风险：校网内理论上存在中间人可能。建议配合 net.pinnedCertFingerprint 做证书固定。');
-  }
-
-  const client = new HttpClient({
-    baseUrl: profile.baseUrl,
-    cookieJar: jar,
-    connectTimeoutMs: net.connectTimeoutMs,
-    readTimeoutMs: net.readTimeoutMs,
-    maxRetries: net.maxRetries,
-    maxRedirects: net.maxRedirects,
-    backoff: net.backoff,
-    concurrency: net.concurrency,
-    rejectUnauthorized,
-    logger,
-  });
-
-  const engine = new FlowEngine({
-    client,
-    profile,
-    dryRun,
-    requireAvailable: true,
-    logger,
-  });
-
-  const store = new TargetStore({
-    targets: config.targets ?? [],
-    backoff: net.backoff,
-    maxAttemptsPerTarget: config.strategy?.maxAttemptsPerTarget ?? 0,
-  });
-
-  const runner = new Runner({
-    engine,
-    store,
-    clock: new Clock(),
-    logger,
-    schedule: config.schedule ?? {},
-    safety: config.safety ?? {},
-    strategy: config.strategy ?? {},
-    backoff: net.backoff,
-    buckets: config.buckets ?? [],
-  });
-
-  process.once('SIGINT', () => {
-    logger.warn('收到中断信号，正在停止…');
-    runner.stop();
-  });
-
-  let out;
-  try {
-    out = await runner.run({ templates: {}, term: config.term ?? {} });
-  } finally {
-    client.destroy();
-  }
-
-  logger.info('─── 汇总 ───');
-  for (const row of out.summary.rows) logger.info(`  [${row.status}] ${row.目标} ${row.结果}`);
-  return out.outcome === 'success' || out.outcome === 'dry-run' ? 0 : 1;
 }
 
 // ────────────────────────────── login ──────────────────────────────
@@ -908,12 +832,18 @@ const USAGE = `
   node src/cli.js <命令> [选项]
 
 命令：
+  ui                    启动本地图形界面（推荐：登录/选课/开抢一站式，双击 启动选课助手.cmd）
   doctor                环境、profile、配置自检
   probe                 探测学校三个入口的连通性（DNS/TCP/TLS/HTTP 分层定位）
   login                 登录统一身份认证（金智 CAS，纯 HTTP，无需浏览器）并保存会话
   rounds                自动发现选课轮次（轮次 ID 每学期都变，不要手填）
   simulate              在本地 Mock 选课系统上跑一遍（不接触真实服务器）
   run                   对真实教务系统运行
+
+ui 选项：
+  --port <端口>         默认 5178，被占用会自动往后找
+  --config <路径>       指定配置文件，默认 config.ggxxk.json
+  --no-open             不自动打开浏览器
 
 rounds 选项：
   --use <关键字>        选定轮次并写入 config.json，例如 --use 体育
@@ -950,11 +880,41 @@ run 选项：
   node src/cli.js doctor
 `;
 
+async function cmdUi(args) {
+  const { startServer } = await import('./ui/server.js');
+  const port = Number(args.port ?? 5178);
+  try {
+    const { url } = await startServer({
+      root: ROOT,
+      port,
+      open: !args['no-open'],
+      configFile: args.config ?? 'config.ggxxk.json',
+    });
+    console.log('');
+    console.log('  ┌─────────────────────────────────────────────┐');
+    console.log('  │  选课助手已启动                              │');
+    console.log('  └─────────────────────────────────────────────┘');
+    console.log(`  地址：${url}`);
+    console.log('  浏览器会自动打开；没打开就把上面这行粘到地址栏。');
+    console.log('');
+    console.log('  这是本机服务，只有这台电脑能访问。');
+    console.log('  用完直接关掉这个黑窗口即可。');
+    console.log('');
+  } catch (err) {
+    console.error(`启动失败：${err.message}`);
+    return 1;
+  }
+  // 不 return，让 HTTP 服务保持事件循环
+  return new Promise(() => {});
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cmd = args._[0];
 
   switch (cmd) {
+    case 'ui':
+      return cmdUi(args);
     case 'doctor':
       return cmdDoctor(args);
     case 'probe':

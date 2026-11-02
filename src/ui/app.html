@@ -1,0 +1,1415 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>南林选课助手</title>
+<style>
+:root{
+  --bg:#08090c;
+  --panel:rgba(255,255,255,.032);
+  --panel-hi:rgba(255,255,255,.055);
+  --line:rgba(255,255,255,.078);
+  --line-hi:rgba(255,255,255,.14);
+  --text:#e9ecf2;
+  --dim:#8b929f;
+  --faint:#5b626f;
+  --accent:#7aa2ff;
+  --green:#3ddc97;
+  --amber:#f2b544;
+  --violet:#b98bff;
+  --danger:#ff6b6b;
+  --r:14px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;color:var(--text);overflow:hidden;
+  font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  background:
+    radial-gradient(880px 500px at 10% -10%, rgba(122,162,255,.10), transparent 62%),
+    radial-gradient(700px 400px at 98% -6%, rgba(185,139,255,.07), transparent 58%),
+    var(--bg);
+  display:flex;flex-direction:column;
+}
+::selection{background:rgba(122,162,255,.3)}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:rgba(255,255,255,.09);border-radius:6px;border:3px solid transparent;background-clip:padding-box}
+*::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.18);background-clip:padding-box}
+button{font:inherit}
+
+/* ── 顶栏 ───────────────────────────────────── */
+.topbar{
+  flex:none;display:flex;align-items:center;gap:24px;flex-wrap:wrap;
+  padding:14px 26px;border-bottom:1px solid var(--line);
+  background:rgba(8,9,12,.8);backdrop-filter:blur(18px) saturate(1.4);
+}
+.brand{display:flex;align-items:center;gap:11px;min-width:0}
+.mark{
+  width:34px;height:34px;border-radius:10px;flex:none;display:grid;place-items:center;
+  background:linear-gradient(150deg, rgba(122,162,255,.9), rgba(185,139,255,.75));
+  box-shadow:0 4px 16px rgba(122,162,255,.25);
+}
+.mark svg{width:17px;height:17px;stroke:#0a0b0f;stroke-width:2.1;fill:none}
+.brand h1{margin:0;font-size:14.5px;font-weight:600;letter-spacing:.1px}
+.brand .env{display:block;font-size:10.5px;color:var(--faint);font-weight:400;letter-spacing:.2px}
+
+.steps{display:flex;align-items:center;gap:6px}
+.stepbtn{
+  display:flex;align-items:center;gap:7px;
+  padding:6px 13px 6px 9px;border-radius:9px;cursor:pointer;
+  border:1px solid transparent;background:transparent;
+  color:var(--dim);font-size:12.5px;transition:.15s;
+}
+.stepbtn:hover{background:rgba(255,255,255,.045);color:var(--text)}
+.stepbtn .n{
+  width:18px;height:18px;border-radius:50%;flex:none;display:grid;place-items:center;
+  font-size:10.5px;font-variant-numeric:tabular-nums;
+  background:rgba(255,255,255,.07);color:var(--faint);transition:.15s;
+}
+.stepbtn.done .n{background:rgba(61,220,151,.16);color:var(--green)}
+.stepbtn.on{
+  background:rgba(122,162,255,.10);color:#cfdcff;
+  border-color:rgba(122,162,255,.28);
+}
+.stepbtn.on .n{background:rgba(122,162,255,.95);color:#0a0b0f;font-weight:600}
+.stepbtn.done.on .n{background:rgba(122,162,255,.95);color:#0a0b0f}
+.wire{width:14px;height:1px;background:var(--line);flex:none}
+
+.pill{
+  margin-left:auto;display:flex;align-items:center;gap:7px;
+  padding:5px 12px;border-radius:20px;font-size:11.5px;
+  border:1px solid var(--line);background:var(--panel);color:var(--dim);
+  white-space:nowrap;
+}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex:none}
+.pill.ok{border-color:rgba(61,220,151,.3);color:#a8f0d0}
+.pill.ok .dot{background:var(--green);box-shadow:0 0 8px rgba(61,220,151,.7)}
+.pill.busy{border-color:rgba(122,162,255,.32);color:#c3d4ff}
+.pill.busy .dot{background:var(--accent);animation:pulse 1.1s infinite}
+.pill.warn{border-color:rgba(242,181,68,.3);color:#ffd894}
+.pill.warn .dot{background:var(--amber)}
+.pill.bad{border-color:rgba(255,107,107,.32);color:#ffb9b9}
+.pill.bad .dot{background:var(--danger)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* ── 工作区 ─────────────────────────────────── */
+.workspace{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 396px;min-height:0}
+.stage{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.pane{flex:1;min-height:0;overflow-y:auto;padding:22px 26px 28px}
+.pane.center{display:flex;flex-direction:column}
+/* 内容矮时垂直居中，内容高时正常从顶部滚——比 justify-content:center 安全（后者会裁掉顶部） */
+.pane.center>*{margin-top:auto;margin-bottom:auto}
+
+/* ── 卡片与表单 ─────────────────────────────── */
+.card{
+  border:1px solid var(--line);border-radius:var(--r);
+  background:var(--panel);padding:22px 24px;
+}
+.field{display:block;margin-bottom:14px}
+.field .lb{display:block;font-size:12px;color:var(--dim);margin-bottom:6px}
+.field input{
+  width:100%;height:40px;padding:0 13px;border-radius:10px;
+  border:1px solid var(--line);background:rgba(0,0,0,.28);color:var(--text);
+  font:inherit;font-size:13.5px;transition:.15s;outline:none;
+}
+.field input:focus{border-color:rgba(122,162,255,.55);box-shadow:0 0 0 3px rgba(122,162,255,.10)}
+.field input::placeholder{color:var(--faint)}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  height:38px;padding:0 18px;border-radius:10px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel-hi);color:var(--text);
+  font-size:13px;transition:.15s;white-space:nowrap;
+}
+.btn:hover:not(:disabled){background:rgba(255,255,255,.09);border-color:var(--line-hi)}
+.btn:disabled{opacity:.42;cursor:not-allowed}
+.btn.primary{
+  background:linear-gradient(160deg, rgba(122,162,255,.95), rgba(122,162,255,.78));
+  border-color:transparent;color:#08090c;font-weight:600;
+  box-shadow:0 4px 18px rgba(122,162,255,.22);
+}
+.btn.primary:hover:not(:disabled){filter:brightness(1.08);box-shadow:0 5px 22px rgba(122,162,255,.32)}
+.btn.live{
+  background:linear-gradient(160deg, #ff7a7a, #e04f4f);
+  border-color:transparent;color:#1a0505;font-weight:600;
+  box-shadow:0 4px 18px rgba(255,107,107,.22);
+}
+.btn.live:hover:not(:disabled){filter:brightness(1.08)}
+.btn.ghost{background:transparent}
+.btn.sm{height:32px;padding:0 12px;font-size:12px;border-radius:8px}
+.btn.plain{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.16);font-weight:500}
+.btn.plain:hover:not(:disabled){background:rgba(255,255,255,.16)}
+.btn.wide{width:100%}
+.btn svg{width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none}
+
+.hint{font-size:12px;color:var(--faint);line-height:1.7}
+.hint b{color:var(--dim);font-weight:500}
+
+/* ── 步骤 1：登录 ───────────────────────────── */
+.login-wrap{max-width:420px;margin:0 auto;width:100%}
+.login-head{margin-bottom:20px}
+.login-head h2{margin:0 0 6px;font-size:17px;font-weight:600}
+.login-head p{margin:0;font-size:12.5px;color:var(--faint);line-height:1.65}
+.notice{
+  display:flex;gap:9px;padding:11px 13px;border-radius:10px;margin-top:16px;
+  background:rgba(122,162,255,.06);border:1px solid rgba(122,162,255,.15);
+  font-size:11.5px;color:var(--dim);line-height:1.6;
+}
+.notice svg{width:14px;height:14px;flex:none;stroke:var(--accent);stroke-width:1.9;fill:none;margin-top:2px}
+.msg{
+  display:none;padding:10px 13px;border-radius:9px;font-size:12.5px;line-height:1.55;
+  margin-bottom:14px;border:1px solid transparent;
+}
+.msg.show{display:block}
+.msg.ok{background:rgba(61,220,151,.08);border-color:rgba(61,220,151,.25);color:#a8f0d0}
+.msg.err{background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.25);color:#ffb9b9}
+.msg.warn{background:rgba(242,181,68,.08);border-color:rgba(242,181,68,.25);color:#ffd894}
+
+.captcha{display:none;margin-top:14px;padding:14px;border-radius:11px;border:1px solid var(--line);background:rgba(0,0,0,.2)}
+.captcha.show{display:block}
+.captcha img{display:block;max-width:200px;border-radius:8px;margin-bottom:10px;background:#fff}
+.captcha .row{display:flex;gap:8px}
+.captcha input{
+  flex:1;height:38px;padding:0 12px;border-radius:9px;border:1px solid var(--line);
+  background:rgba(0,0,0,.3);color:var(--text);font:inherit;outline:none;
+}
+
+/* ── 步骤 2：选课 ───────────────────────────── */
+/* 这一步内部要让两栏各自滚动、底栏常驻可见，所以不能用 .pane 的"整页滚动" */
+#pane2{display:flex;flex-direction:column;overflow:hidden;padding:0}
+.picker{flex:1;min-height:0;display:grid;grid-template-columns:minmax(300px,.92fr) minmax(400px,1.08fr);gap:16px;padding:18px 22px 0}
+.col{min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);overflow:hidden}
+.col-head{
+  flex:none;display:flex;align-items:center;gap:9px;
+  padding:13px 15px 11px;border-bottom:1px solid var(--line);
+}
+.col-head h2{margin:0;font-size:13px;font-weight:600}
+.col-head .count{font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.col-head .sp{flex:1}
+.col-body{flex:1;min-height:0;overflow-y:auto;padding:8px;overscroll-behavior:contain}
+
+.search{position:relative;padding:11px 15px;border-bottom:1px solid var(--line)}
+.search input{
+  width:100%;height:34px;padding:0 30px 0 11px;border-radius:9px;
+  border:1px solid var(--line);background:rgba(0,0,0,.26);color:var(--text);
+  font:inherit;font-size:12.5px;outline:none;transition:.15s;
+}
+.search input:focus{border-color:rgba(122,162,255,.5)}
+.search input::placeholder{color:var(--faint)}
+.search .clear{
+  position:absolute;right:22px;top:50%;transform:translateY(-50%);
+  width:18px;height:18px;border:0;border-radius:5px;background:rgba(255,255,255,.08);
+  color:var(--faint);cursor:pointer;display:none;place-items:center;padding:0;
+}
+.search .clear svg{width:9px;height:9px;stroke:currentColor;stroke-width:2;fill:none}
+.search.filled .clear{display:grid}
+
+.chips{display:flex;gap:5px;flex-wrap:wrap;padding:10px 15px 11px;border-bottom:1px solid var(--line)}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:4px 9px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--line);background:transparent;
+  font-size:11.5px;color:var(--dim);transition:.14s;
+}
+.chip:hover{border-color:var(--line-hi);color:var(--text)}
+.chip.on{background:rgba(122,162,255,.12);border-color:rgba(122,162,255,.4);color:#cfdcff}
+.chip .d{width:5px;height:5px;border-radius:50%;background:var(--c,transparent)}
+.chip .n{font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.chip.on .n{color:rgba(207,220,255,.7)}
+
+.course{
+  position:relative;display:flex;align-items:center;gap:10px;
+  padding:7px 10px 7px 13px;border-radius:9px;cursor:pointer;
+  transition:background .13s;
+}
+.course::before{
+  content:"";position:absolute;left:2px;top:50%;transform:translateY(-50%);
+  width:3px;height:16px;border-radius:2px;background:var(--c);
+  opacity:.55;transition:height .16s,opacity .16s;
+}
+.course:hover{background:rgba(255,255,255,.045)}
+.course:hover::before{height:22px;opacity:1}
+.course.in{background:rgba(122,162,255,.07)}
+.course.in::before{background:var(--accent);height:22px;opacity:1}
+.course.muted::before{opacity:.2}
+.course .body{min-width:0;flex:1}
+.course .nm{font-size:13px;display:flex;align-items:center;gap:7px}
+.course .nm b{font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.course.muted .nm b{color:var(--dim)}
+.course .sub{
+  margin-top:1px;font-size:11px;color:var(--faint);
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+}
+.course .sub .code{font-family:ui-monospace,Consolas,monospace;letter-spacing:.2px}
+.course .sub .sep{opacity:.4}
+.tag{display:inline-flex;align-items:center;gap:4px;color:var(--c);opacity:.92}
+.tag .d{width:4px;height:4px;border-radius:50%;background:var(--c)}
+.course .cr{
+  flex:none;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;
+  padding:1px 7px;border-radius:5px;background:rgba(255,255,255,.05);
+}
+.badge{
+  flex:none;width:20px;height:20px;border-radius:6px;display:grid;place-items:center;
+  background:rgba(122,162,255,.16);box-shadow:inset 0 0 0 1px rgba(122,162,255,.3);
+}
+.badge svg{width:11px;height:11px;stroke:#a8c2ff;stroke-width:2.1;fill:none}
+
+.empty{padding:36px 20px;text-align:center;color:var(--faint);font-size:12px;line-height:1.8}
+
+/* 方案面板 */
+.bkt{padding:12px 13px;border-bottom:1px solid var(--line)}
+.bkt:last-child{border-bottom:0}
+.bkt-head{display:flex;align-items:center;gap:7px;margin-bottom:2px}
+.bkt-head .dot{width:6px;height:6px;border-radius:50%;background:var(--c);flex:none}
+.bkt-head h3{margin:0;font-size:12.5px;font-weight:600}
+.bkt-head .st{
+  margin-left:auto;font-size:11px;color:var(--faint);
+  padding:1px 7px;border-radius:5px;background:rgba(255,255,255,.04);flex:none;
+}
+.bkt-head .st.ok{color:var(--green);background:rgba(61,220,151,.1)}
+.bkt-meta{display:flex;align-items:center;gap:6px;margin-bottom:7px}
+.bkt-meta .rule{
+  font-size:10.5px;color:var(--faint);min-width:0;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.more{
+  flex:none;border:0;border-radius:6px;background:rgba(255,255,255,.05);
+  color:var(--dim);font:inherit;font-size:10.5px;padding:2px 7px;cursor:pointer;transition:.13s;
+}
+.more:hover{background:rgba(255,255,255,.1);color:var(--text)}
+.stepper{
+  display:flex;align-items:center;flex:none;border:1px solid var(--line);
+  border-radius:7px;overflow:hidden;background:rgba(255,255,255,.03);
+}
+.stepper button{
+  width:19px;height:21px;border:0;background:transparent;color:var(--faint);
+  cursor:pointer;font-size:12px;line-height:1;padding:0;transition:.12s;
+}
+.stepper button:hover{background:rgba(255,255,255,.09);color:var(--text)}
+.stepper .v{min-width:44px;text-align:center;font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.stepper .v b{color:var(--dim);font-weight:500}
+
+.slots{display:flex;flex-direction:column;gap:2px}
+.slot{
+  display:flex;align-items:center;gap:7px;padding:6px 7px;border-radius:8px;
+  background:rgba(255,255,255,.032);border:1px solid transparent;cursor:grab;
+  transition:background .13s,border-color .13s;
+}
+.slot:hover{background:rgba(255,255,255,.06)}
+.slot.dragging{opacity:.35}
+.slot.drop-target,.slot.drop{border-color:rgba(122,162,255,.55);background:rgba(122,162,255,.10)}
+.slot .grip{flex:none;color:var(--faint);display:grid;place-items:center;cursor:grab}
+.slot .grip svg{width:8px;height:12px;fill:currentColor}
+.slot .idx{
+  flex:none;width:15px;text-align:center;font-size:10px;color:var(--faint);
+  font-variant-numeric:tabular-nums;
+}
+.slot .body{min-width:0;flex:1}
+.slot .nm{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot .sub{display:flex;gap:6px;font-size:10px;color:var(--faint);margin-top:1px}
+.slot .sub .code{font-family:ui-monospace,Consolas,monospace}
+.slot .del{
+  flex:none;width:19px;height:19px;border:0;border-radius:5px;background:transparent;
+  color:var(--faint);cursor:pointer;opacity:0;display:grid;place-items:center;transition:.13s;padding:0;
+}
+.slot:hover .del{opacity:1}
+.slot .del:hover{background:rgba(255,107,107,.16);color:var(--danger)}
+.slot .del svg{width:9px;height:9px;stroke:currentColor;stroke-width:2;fill:none}
+.no-slot{
+  padding:9px;border-radius:8px;text-align:center;font-size:10.5px;color:var(--faint);
+  border:1px dashed var(--line);
+}
+.warn-inline{color:var(--amber)}
+
+/* 步骤 2 底栏 */
+.actions{
+  flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:12px 22px 16px;
+}
+.actions .sp{flex:1}
+
+/* ── 步骤 3：开抢 ───────────────────────────── */
+.run-wrap{max-width:660px;margin:0 auto;width:100%}
+.run-head{margin-bottom:16px}
+.run-head h2{margin:0 0 5px;font-size:16px;font-weight:600}
+.run-head p{margin:0;font-size:12px;color:var(--faint);line-height:1.65}
+.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+.sum{
+  border:1px solid var(--line);border-radius:11px;padding:12px 13px;
+  background:var(--panel);position:relative;overflow:hidden;
+}
+.sum::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--c);opacity:.7}
+.sum .t{font-size:11px;color:var(--faint);display:flex;align-items:center;gap:5px}
+.sum .t .d{width:5px;height:5px;border-radius:50%;background:var(--c)}
+.sum .v{font-size:19px;font-variant-numeric:tabular-nums;margin-top:3px;line-height:1.2}
+.sum .v small{font-size:11px;color:var(--faint);margin-left:3px;font-weight:400}
+.sum .s{font-size:10.5px;color:var(--faint);margin-top:2px}
+
+.run-card{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);padding:18px 20px;margin-bottom:14px}
+.run-card h3{margin:0 0 12px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.run-card h3 .tag2{font-size:10px;color:var(--faint);font-weight:400;padding:1px 7px;border-radius:5px;background:rgba(255,255,255,.05)}
+.run-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.timeinput{
+  height:34px;padding:0 11px;border-radius:9px;border:1px solid var(--line);
+  background:rgba(0,0,0,.28);color:var(--text);font:inherit;font-size:12.5px;outline:none;
+  color-scheme:dark;
+}
+.timeinput:focus{border-color:rgba(122,162,255,.5)}
+
+.split{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.choice{
+  border:1px solid var(--line);border-radius:11px;padding:14px 15px;
+  background:rgba(255,255,255,.02);display:flex;flex-direction:column;gap:9px;
+}
+.choice h4{margin:0;font-size:12.5px;font-weight:600}
+.choice p{margin:0;font-size:11px;color:var(--faint);line-height:1.6;flex:1}
+.choice.safe{border-color:rgba(61,220,151,.22)}
+.choice.risky{border-color:rgba(255,107,107,.22)}
+
+#resultBox{margin-top:14px}
+.res-row{
+  display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:8px;
+  background:rgba(255,255,255,.035);font-size:12px;margin-bottom:5px;
+}
+.res-row .st{font-size:10.5px;padding:1px 7px;border-radius:5px;background:rgba(255,255,255,.06);color:var(--dim);flex:none}
+.res-row .st.ok{background:rgba(61,220,151,.12);color:var(--green)}
+.res-row .st.bad{background:rgba(255,107,107,.12);color:#ffb9b9}
+
+/* ── 日志控制台 ─────────────────────────────── */
+.console{
+  min-height:0;display:flex;flex-direction:column;
+  border-left:1px solid var(--line);background:rgba(0,0,0,.24);
+}
+.con-head{
+  flex:none;display:flex;align-items:center;gap:8px;
+  padding:12px 14px;border-bottom:1px solid var(--line);
+}
+.con-head .t{font-size:11.5px;color:var(--dim);letter-spacing:.3px;text-transform:uppercase}
+.con-head .live{
+  display:none;align-items:center;gap:5px;font-size:10px;color:var(--green);
+}
+.con-head .live.on{display:flex}
+.con-head .live .d{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 1.2s infinite}
+.con-head .sp{flex:1}
+.iconbtn{
+  width:24px;height:24px;border:0;border-radius:6px;background:transparent;
+  color:var(--faint);cursor:pointer;display:grid;place-items:center;transition:.13s;padding:0;
+}
+.iconbtn:hover{background:rgba(255,255,255,.08);color:var(--text)}
+.iconbtn svg{width:12px;height:12px;stroke:currentColor;stroke-width:2;fill:none}
+.con-body{
+  flex:1;min-height:0;overflow-y:auto;padding:12px 13px 22px;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:11.5px;line-height:1.8;overscroll-behavior:contain;
+}
+.logline{display:flex;gap:9px;padding:1px 0;word-break:break-word}
+.logline .ts{flex:none;color:#4a505d;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+.logline .tx{min-width:0;color:#9aa1ad}
+.logline.warn .tx{color:#e8c27a}
+.logline.error .tx{color:#ff9d9d}
+.logline .tx .em{color:var(--text)}
+.con-empty{color:#6f7683;font-size:11px;line-height:1.85;padding:12px 3px}
+.con-foot{flex:none;border-top:1px solid var(--line);padding:8px 12px;font-size:10.5px;color:var(--faint)}
+
+/* ── 遮罩 / 弹层 ────────────────────────────── */
+.mask{
+  position:fixed;inset:0;z-index:80;display:none;place-items:center;
+  background:rgba(0,0,0,.62);backdrop-filter:blur(3px);padding:24px;
+}
+.mask.show{display:grid}
+.dialog{
+  width:min(760px,100%);max-height:80vh;display:flex;flex-direction:column;
+  border:1px solid var(--line-hi);border-radius:14px;background:#0d0f14;
+  box-shadow:0 24px 70px rgba(0,0,0,.6);
+}
+.dialog header{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.dialog header h3{margin:0;font-size:13px;font-weight:600}
+.dialog header .sp{flex:1}
+.dialog pre{
+  margin:0;padding:14px 16px;overflow:auto;flex:1;
+  font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.65;color:#a9b2c1;
+}
+.dialog footer{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line);justify-content:flex-end}
+
+.toast{
+  position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);z-index:90;
+  padding:9px 17px;border-radius:9px;font-size:12.5px;
+  background:#1a1d25;border:1px solid var(--line-hi);color:var(--text);
+  box-shadow:0 12px 30px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:.2s;
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:1080px){
+  .workspace{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) 200px}
+  .console{border-left:0;border-top:1px solid var(--line)}
+  /* 窄屏放弃 grid：两栏改成上下堆叠的长页面，每栏各自限高并可滚动 */
+  .picker{display:block;overflow-y:auto;padding:14px 16px 12px}
+  .col{display:block;overflow:visible}
+  .col+.col{margin-top:12px}
+  .col-body{max-height:46vh;overflow-y:auto}
+  .actions{padding:10px 16px 14px}
+  .summary{grid-template-columns:1fr}
+  .split{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark">
+      <svg viewBox="0 0 24 24"><path d="M4 19.5V6a2 2 0 012-2h9l5 5v10.5a2 2 0 01-2 2H6a2 2 0 01-2-2z" stroke-linejoin="round"/><path d="M14 4v6h6" stroke-linejoin="round"/></svg>
+    </div>
+    <div>
+      <h1>南林选课助手</h1>
+      <span class="env">在你自己电脑上运行 · 数据不外传</span>
+    </div>
+  </div>
+
+  <nav class="steps">
+    <button class="stepbtn on" data-go="1"><span class="n" id="n1">1</span>登录</button>
+    <span class="wire"></span>
+    <button class="stepbtn" data-go="2"><span class="n" id="n2">2</span>选课</button>
+    <span class="wire"></span>
+    <button class="stepbtn" data-go="3"><span class="n" id="n3">3</span>开抢</button>
+  </nav>
+
+  <div class="pill" id="pill"><span class="dot"></span><span id="pillText">正在启动…</span></div>
+</header>
+
+<div class="workspace">
+  <div class="stage">
+
+    <!-- ═══ 步骤 1 ═══ -->
+    <section class="pane center" id="pane1">
+      <div class="login-wrap">
+        <div class="login-head">
+          <h2>登录教务系统</h2>
+          <p>用学校统一身份认证的学号和密码登录。程序会保存登录状态，之后抢课就不用再输密码了。</p>
+        </div>
+
+        <div class="msg" id="loginMsg"></div>
+
+        <div class="card">
+          <label class="field">
+            <span class="lb">学号</span>
+            <input id="username" type="text" inputmode="numeric" autocomplete="username" placeholder="例如 20240101">
+          </label>
+          <label class="field">
+            <span class="lb">密码</span>
+            <input id="password" type="password" autocomplete="current-password" placeholder="统一身份认证密码">
+          </label>
+          <button class="btn primary wide" id="btnLogin">
+            <svg viewBox="0 0 16 16"><path d="M6 3l5 5-5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            登录
+          </button>
+
+          <div class="captcha" id="captchaBox">
+            <div class="hint" style="margin-bottom:8px">服务端要求验证码（连续输错后的风控措施）</div>
+            <img id="captchaImg" alt="验证码">
+            <div class="row">
+              <input id="captchaCode" placeholder="图上字符" autocomplete="off">
+              <button class="btn" id="btnCaptcha">提交</button>
+            </div>
+          </div>
+
+          <div class="notice">
+            <svg viewBox="0 0 16 16"><path d="M8 1.6l6 3v4.2c0 3.2-2.5 5.5-6 6.6-3.5-1.1-6-3.4-6-6.6V4.6l6-3z" stroke-linejoin="round"/><path d="M5.6 8l1.8 1.8L10.6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div>密码只在本次登录时用一次，<b style="color:var(--dim)">不会保存到任何文件</b>，也不会发到除学校服务器以外的任何地方。学号会记在浏览器里，下次打开不用重填。</div>
+          </div>
+        </div>
+
+        <div class="hint" style="margin-top:14px">
+          登录成功后自动进入第 2 步。如果提示「会话可疑」，多半是学校系统临时波动，重试一次即可。
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ 步骤 2 ═══ -->
+    <section class="pane" id="pane2" style="display:none;padding:0">
+      <div class="picker">
+        <div class="col">
+          <div class="col-head">
+            <h2>课程库</h2>
+            <span class="count" id="poolCount">—</span>
+            <span class="sp"></span>
+            <span class="hint" style="font-size:10.5px">点一下加入右边</span>
+          </div>
+          <div class="search" id="searchWrap">
+            <input id="search" placeholder="搜课程名 / 代码 / 学院…">
+            <button class="clear" id="searchClear"><svg viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke-linecap="round"/></svg></button>
+          </div>
+          <div class="chips" id="chips"></div>
+          <div class="col-body" id="pool"></div>
+        </div>
+
+        <div class="col">
+          <div class="col-head">
+            <h2>我要的类别</h2>
+            <span class="count" id="planCount">—</span>
+            <span class="sp"></span>
+            <button class="btn sm ghost" id="btnAuto">一键填充</button>
+          </div>
+          <div class="col-body" id="buckets" style="padding:0"></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <span class="hint" style="flex:1;min-width:200px">
+          右栏顺序就是尝试顺序：<b>排在前面且有名额的课先抢</b>；满员才往后换。
+        </span>
+        <button class="btn" id="btnPreview">查看配置</button>
+        <button class="btn" id="btnSave">保存</button>
+        <button class="btn primary" id="btnNext">下一步：开抢</button>
+      </div>
+    </section>
+
+    <!-- ═══ 步骤 3 ═══ -->
+    <section class="pane" id="pane3" style="display:none">
+      <div class="run-wrap">
+        <div class="run-head">
+          <h2>准备开抢</h2>
+          <p>程序会按顺序盯住这些课，一有名额立刻提交。开始后可以随时停。</p>
+        </div>
+        <div class="summary" id="summary"></div>
+
+        <div class="run-card">
+          <h3>开抢时间 <span class="tag2">到点自动开始</span></h3>
+          <div class="run-row">
+            <input class="timeinput" id="startAt" type="datetime-local" step="1">
+            <button class="btn sm" id="btnNow">改为立即开始</button>
+            <span class="hint" style="flex:1;min-width:150px" id="startHint"></span>
+          </div>
+        </div>
+
+        <div class="run-card">
+          <h3>开始 <span class="tag2">建议先试运行一次</span></h3>
+          <div class="split">
+            <div class="choice safe">
+              <h4>试运行</h4>
+              <p>只读取课程列表并匹配，<b style="color:var(--dim)">不会真的提交选课</b>。用来看程序能不能找到你要的课。</p>
+              <button class="btn plain wide" id="btnDry">试运行一次</button>
+            </div>
+            <div class="choice risky">
+              <h4>正式抢课</h4>
+              <p>真的提交选课请求。<b style="color:#ffb9b9">选中了就退不掉</b>（要退得自己上教务系统操作），请确认候选课都能接受。</p>
+              <button class="btn live wide" id="btnLive">开始抢课</button>
+            </div>
+          </div>
+          <div id="resultBox"></div>
+        </div>
+
+        <div class="hint">
+          运行中随时可以点顶部的「停止」；关掉这个页面不影响正在跑的抢课，但你就看不到日志了 —— 建议让它开着。
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ═══ 日志 ═══ -->
+  <aside class="console">
+    <div class="con-head">
+      <span class="t">运行日志</span>
+      <span class="live" id="conLive"><span class="d"></span>运行中</span>
+      <span class="sp"></span>
+      <button class="iconbtn" id="btnStop" title="停止运行" style="display:none">
+        <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1.2" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button class="iconbtn" id="btnClearLog" title="清空显示">
+        <svg viewBox="0 0 12 12"><path d="M2 3.5h8M4.5 3.5V2h3v1.5M3.5 3.5l.5 7h4l.5-7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="con-body" id="logs">
+      <div class="con-empty">
+        <b style="color:var(--dim)">还没有开始运行</b><br><br>
+        ① 在左边选好要抢的课<br>
+        ② 点「试运行一次」，看能不能找到这些课<br>
+        ③ 确认没问题再点「开始抢课」<br><br>
+        运行时，程序每一次请求、每一次匹配都会实时出现在这里。
+      </div>
+    </div>
+    <div class="con-foot" id="conFoot">就绪</div>
+  </aside>
+</div>
+
+<div class="mask" id="mask">
+  <div class="dialog">
+    <header>
+      <h3 id="dlgTitle">配置</h3>
+      <span class="sp"></span>
+      <button class="iconbtn" id="dlgClose"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke-linecap="round"/></svg></button>
+    </header>
+    <pre id="dlgBody"></pre>
+    <footer>
+      <button class="btn sm" id="dlgCopy">复制</button>
+      <button class="btn sm" id="dlgOk">关闭</button>
+    </footer>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ── 状态 ────────────────────────────────────────────────────
+const S = {
+  step: 1,
+  catalog: [],
+  byCode: new Map(),
+  chains: {},
+  earned: {},
+  config: null,
+  session: null,
+  filter: 'all',
+  q: '',
+  expanded: {},
+  running: false,
+  lastResult: null,
+  captchaPending: false,
+};
+
+const BUCKETS = [
+  { id:'green', label:'绿色文明', need:2, color:'#3ddc97',
+    rule:'类别 = 绿色文明',
+    accepts: c => c.category === '绿色文明' },
+  { id:'innov', label:'创新创业', need:2, color:'#f2b544',
+    rule:'课程单元 = 创新创业',
+    accepts: c => c.unit === '创新创业' },
+  { id:'art', label:'艺术审美', need:2, color:'#b98bff',
+    rule:'美学和艺术史论类 / 艺术鉴赏和评论类',
+    accepts: c => c.unit === '艺术审美（美学和艺术史论类）' || c.unit === '艺术审美（艺术鉴赏和评论类）' },
+];
+const BK = new Map(BUCKETS.map(b => [b.id, b]));
+const COLLAPSE_AT = 3;
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const bucketOf = c => BUCKETS.find(b => b.accepts(c)) || null;
+const creditsOf = code => S.byCode.get(code)?.credits || 0;
+const chainCredits = bid => (S.chains[bid] || []).reduce((n, c) => n + creditsOf(c), 0);
+
+function toast(msg){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), 1900);
+}
+
+// ── 步骤切换 ────────────────────────────────────────────────
+function goStep(n){
+  S.step = n;
+  for (const i of [1,2,3]) {
+    const pane = $('#pane' + i);
+    if (pane) pane.style.display = i === n ? '' : 'none';
+  }
+  document.querySelectorAll('[data-go]').forEach(b => {
+    b.classList.toggle('on', Number(b.dataset.go) === n);
+  });
+  renderSteps();
+  if (n === 2) render();
+  if (n === 3) renderSummary();
+}
+
+function renderSteps(){
+  const logged = Boolean(S.session?.exists);
+  const ready = BUCKETS.every(b => stateNeed(b.id) === 0 || chainCredits(b.id) >= stateNeed(b.id));
+  $('#n1').textContent = logged ? '✓' : '1';
+  $('#n2').textContent = ready ? '✓' : '2';
+  $('#n3').textContent = '3';
+  document.querySelector('[data-go="1"]').classList.toggle('done', logged);
+  document.querySelector('[data-go="2"]').classList.toggle('done', ready);
+
+  const pill = $('#pill'), txt = $('#pillText');
+  pill.className = 'pill';
+  if (S.running) { pill.classList.add('busy'); txt.textContent = '正在运行'; }
+  else if (S.session?.usable) { pill.classList.add('ok'); txt.textContent = '已登录'; }
+  else if (S.session?.exists) { pill.classList.add('warn'); txt.textContent = '登录已过期'; }
+  else { txt.textContent = '未登录'; }
+}
+
+function stateNeed(bid){
+  const got = S.earned[bid] || 0;
+  const need = Math.max(0, (BK.get(bid)?.need ?? 0) - got);
+  return need;
+}
+
+// ── 引导：加载初始数据 ──────────────────────────────────────
+async function boot(){
+  try {
+    const r = await fetch('/api/bootstrap');
+    const d = await r.json();
+    S.catalog = d.catalog?.courses ?? [];
+    S.byCode = new Map(S.catalog.map(c => [c.code, c]));
+    S.config = d.config ?? {};
+    S.session = d.session ?? {};
+    S.lastResult = d.lastResult ?? null;
+    S.running = Boolean(d.job);
+
+    applyConfig(S.config);
+    restoreIdentity();
+    renderSessionState();
+    if (d.profile) showProfileState(d.profile);
+    if (S.session?.usable) goStep(2); else goStep(1);
+    // ?step=N 可以直接落到某一步（便于把「开抢」页存成书签）
+    const jump = /[?&]step=([123])/.exec(location.search);
+    if (jump) goStep(Number(jump[1]));
+    if (d.lastResult) renderResult(d.lastResult);
+  } catch (err) {
+    $('#pill').className = 'pill bad';
+    $('#pillText').textContent = '无法连接本地服务';
+    console.error(err);
+  }
+}
+
+// 把配置文件还原成界面状态：targets 按桶分组，needCredits 反推已修学分
+function applyConfig(cfg){
+  for (const b of BUCKETS) { S.chains[b.id] = []; S.earned[b.id] = 0; }
+  const targets = new Map((cfg.targets ?? []).map(t => [t.id, t]));
+  for (const bucket of cfg.buckets ?? []) {
+    if (!S.chains[bucket.id]) continue;
+    const need = Number(bucket.needCredits ?? 0);
+    S.earned[bucket.id] = Math.max(0, (BK.get(bucket.id)?.need ?? 0) - need);
+    for (const tid of bucket.targets ?? []) {
+      const t = targets.get(tid);
+      if (!t) continue;
+      const code = t.courseCode?.exact?.[0] ?? t._code;
+      if (code && S.byCode.has(code)) S.chains[bucket.id].push(code);
+    }
+  }
+
+  const sa = cfg.schedule?.startAt;
+  if (sa) {
+    const d = new Date(sa);
+    if (!Number.isNaN(d.getTime())) {
+      const pad = n => String(n).padStart(2, '0');
+      $('#startAt').value =
+        `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+  }
+}
+
+function restoreIdentity(){
+  const u = localStorage.getItem('nfqk.username');
+  if (u) $('#username').value = u;
+}
+
+function renderSessionState(){
+  const s = S.session ?? {};
+  if (s.exists && !s.usable) {
+    setMsg('warn', '检测到一份旧的登录记录，但它可能已经失效。如果下一步打不开课程列表，回来重新登录即可。');
+  } else if (s.exists) {
+    setMsg('ok', '当前已有登录状态，可以直接进入第 2 步；想换账号就重新登录一次。');
+  }
+}
+
+function showProfileState(p){
+  if (!p) return;
+  if (p.status && !String(p.status).startsWith('VERIFIED')) {
+    const div = document.createElement('div');
+    div.className = 'hint';
+    div.style.marginTop = '14px';
+    div.innerHTML = `接口状态：<b style="color:var(--amber)">${esc(String(p.status).split('——')[0].trim())}</b> —— 有依据但没在本学期验证过。首次试运行时若「课程列表 0 条」，说明学校接口变了。`;
+    $('#pane3 .run-wrap')?.appendChild(div);
+  }
+}
+
+function setMsg(kind, text){
+  const el = $('#loginMsg');
+  if (!text) { el.className = 'msg'; return; }
+  el.className = 'msg show ' + kind;
+  el.textContent = text;
+}
+
+// ── 登录 ────────────────────────────────────────────────────
+$('#btnLogin').onclick = async () => {
+  const username = $('#username').value.trim();
+  const password = $('#password').value;
+  if (!username || !password) return setMsg('err', '请把学号和密码都填上');
+
+  localStorage.setItem('nfqk.username', username);
+  setMsg('', '');
+  $('#captchaBox').classList.remove('show');
+  $('#btnLogin').disabled = true;
+  $('#btnLogin').textContent = '正在登录…';
+
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const d = await r.json();
+    if (d.needCaptcha) {
+      S.captchaPending = true;
+      $('#captchaImg').src = d.image || '';
+      $('#captchaBox').classList.add('show');
+      setMsg('warn', d.message || '需要输入验证码');
+    } else if (d.ok) {
+      S.session = d.session ?? { exists: true };
+      $('#password').value = '';
+      setMsg('ok', '登录成功，正在进入选课…');
+      renderSteps();
+      setTimeout(() => goStep(2), 500);
+    } else {
+      setMsg('err', d.message || '登录失败');
+    }
+  } catch (err) {
+    setMsg('err', '请求失败：' + err.message);
+  } finally {
+    $('#btnLogin').disabled = false;
+    $('#btnLogin').innerHTML = '<svg viewBox="0 0 16 16"><path d="M6 3l5 5-5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>登录';
+  }
+};
+
+$('#btnCaptcha').onclick = async () => {
+  const code = $('#captchaCode').value.trim();
+  if (!code) return setMsg('err', '请填验证码');
+  $('#btnCaptcha').disabled = true;
+  try {
+    const r = await fetch('/api/login/captcha', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const d = await r.json();
+    if (d.needCaptcha) {
+      $('#captchaImg').src = d.image || '';
+      setMsg('warn', '验证码不对，换一张再试');
+    } else if (d.ok) {
+      S.session = d.session ?? { exists: true };
+      $('#captchaBox').classList.remove('show');
+      setMsg('ok', '登录成功，正在进入选课…');
+      renderSteps();
+      setTimeout(() => goStep(2), 500);
+    } else {
+      setMsg('err', d.message || '验证码提交失败');
+    }
+  } finally {
+    $('#btnCaptcha').disabled = false;
+  }
+};
+
+$('#password').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btnLogin').click(); });
+$('#captchaCode').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btnCaptcha').click(); });
+
+// ── 课程库 ──────────────────────────────────────────────────
+const FILTERS = [
+  { id:'all',   label:'全部' },
+  { id:'green', label:'绿色文明', color:'#3ddc97', test: c => c.category === '绿色文明' },
+  { id:'innov', label:'创新创业', color:'#f2b544', test: c => c.unit === '创新创业' },
+  { id:'art',   label:'艺术审美', color:'#b98bff', test: c => BUCKETS[2].accepts(c) },
+  { id:'other', label:'不计学分' },
+];
+
+function placement(code){
+  for (const b of BUCKETS) {
+    const i = S.chains[b.id].indexOf(code);
+    if (i >= 0) return { b, i };
+  }
+  return null;
+}
+
+function poolList(){
+  const f = FILTERS.find(x => x.id === S.filter) || FILTERS[0];
+  const q = S.q.toLowerCase();
+  return S.catalog.filter(c => {
+    if (f.test) { if (!f.test(c)) return false; }
+    else if (f.id === 'all') { if (!bucketOf(c)) return false; }
+    else if (f.id === 'other') { if (bucketOf(c)) return false; }
+    if (!q) return true;
+    return [c.name, c.code, c.category, c.unit, c.dept, c.nameEn].join(' ').toLowerCase().includes(q);
+  });
+}
+
+function renderChips(){
+  const counts = {
+    all: S.catalog.filter(c => bucketOf(c)).length,
+    green: S.catalog.filter(c => c.category === '绿色文明').length,
+    innov: S.catalog.filter(c => c.unit === '创新创业').length,
+    art: S.catalog.filter(c => BUCKETS[2].accepts(c)).length,
+    other: S.catalog.filter(c => !bucketOf(c)).length,
+  };
+  $('#chips').innerHTML = FILTERS.map(f => {
+    const on = S.filter === f.id ? ' on' : '';
+    const dot = f.color ? `<span class="d" style="--c:${f.color}"></span>` : '';
+    return `<button class="chip${on}" data-f="${f.id}">${dot}${f.label}<span class="n">${counts[f.id]}</span></button>`;
+  }).join('');
+  $('#chips').querySelectorAll('[data-f]').forEach(el => {
+    el.onclick = () => { S.filter = el.dataset.f; renderChips(); renderPool(); };
+  });
+}
+
+function renderPool(){
+  const list = poolList();
+  $('#poolCount').textContent = list.length + ' 门';
+
+  if (!list.length) {
+    $('#pool').innerHTML = `<div class="empty">没有匹配的课程<br><span style="font-size:11px">换个关键词试试</span></div>`;
+    return;
+  }
+
+  $('#pool').innerHTML = list.map(c => {
+    const b = bucketOf(c);
+    const put = placement(c.code);
+    const color = b ? b.color : 'rgba(255,255,255,.22)';
+    const tag = b
+      ? `<span class="tag" style="--c:${b.color}"><span class="d"></span>${b.label}</span>`
+      : `<span class="tag" style="--c:rgba(255,255,255,.28)"><span class="d"></span>不计学分</span>`;
+    return `<div class="course${put ? ' in' : ''}${b ? '' : ' muted'}" data-code="${esc(c.code)}" style="--c:${color}">
+      <div class="body">
+        <div class="nm"><b title="${esc(c.name)}">${esc(c.name)}</b></div>
+        <div class="sub">
+          <span class="code">${esc(c.code)}</span><span class="sep">·</span>
+          ${tag}<span class="sep">·</span><span>${esc(c.dept || '')}</span>
+        </div>
+      </div>
+      <span class="cr">${c.credits} 分</span>
+      ${put
+        ? `<span class="badge" title="已加入，点击移出"><svg viewBox="0 0 12 12"><path d="M2 6.3l2.6 2.6L10 3.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
+        : `<span style="width:20px"></span>`}
+    </div>`;
+  }).join('');
+}
+
+$('#pool').addEventListener('click', e => {
+  const row = e.target.closest('[data-code]');
+  if (!row) return;
+  const code = row.dataset.code;
+  const c = S.byCode.get(code);
+  if (!c) return;
+
+  const put = placement(code);
+  if (put) {
+    S.chains[put.b.id].splice(put.i, 1);
+    toast(`已从「${put.b.label}」移出`);
+  } else {
+    const b = bucketOf(c);
+    if (!b) return toast('这门课不计入任何目标类别');
+    S.chains[b.id].push(code);
+    toast(`已加入「${b.label}」`);
+  }
+  render();
+});
+
+$('#search').addEventListener('input', e => {
+  S.q = e.target.value.trim();
+  $('#searchWrap').classList.toggle('filled', Boolean(S.q));
+  renderPool();
+});
+$('#searchClear').onclick = () => {
+  $('#search').value = '';
+  S.q = '';
+  $('#searchWrap').classList.remove('filled');
+  renderPool();
+};
+
+// ── 方案 ────────────────────────────────────────────────────
+function renderBuckets(){
+  $('#buckets').innerHTML = BUCKETS.map(b => {
+    const chain = S.chains[b.id];
+    const need = stateNeed(b.id);
+    const planned = chainCredits(b.id);
+    const done = need === 0 || planned >= need;
+    const shortfall = Math.max(0, need - planned);
+    const expanded = Boolean(S.expanded[b.id]);
+    const visible = expanded ? chain : chain.slice(0, COLLAPSE_AT);
+    const hidden = chain.length - visible.length;
+
+    const slots = visible.map((code, i) => {
+      const c = S.byCode.get(code) || { name: '(未知)', credits: 0, code };
+      const wrong = !b.accepts(c);
+      return `<div class="slot" draggable="true" data-b="${b.id}" data-i="${i}" data-code="${esc(code)}">
+        <span class="grip"><svg viewBox="0 0 10 14"><circle cx="2" cy="2" r="1.2"/><circle cx="8" cy="2" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="8" cy="7" r="1.2"/><circle cx="2" cy="12" r="1.2"/><circle cx="8" cy="12" r="1.2"/></svg></span>
+        <span class="idx">${i+1}</span>
+        <div class="body">
+          <div class="nm" title="${esc(c.name)}">${esc(c.name)}</div>
+          <div class="sub"><span class="code">${esc(c.code)}</span><span>${c.credits} 分</span></div>
+        </div>
+        <button class="del" data-del="${b.id}" data-i="${i}" title="移出"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke-linecap="round"/></svg></button>
+      </div>`;
+    }).join('');
+
+    return `<div class="bkt" data-bkt="${b.id}" style="--c:${b.color}">
+      <div class="bkt-head">
+        <span class="dot"></span>
+        <h3>${b.label}</h3>
+        <span class="st${need === 0 ? ' ok' : ''}">${need === 0 ? '已修满' : done ? `需 ${need} 分` : `还差 ${shortfall} 分`}</span>
+      </div>
+      <div class="bkt-meta">
+        <span class="rule" title="${b.rule}">${b.rule}</span>
+        ${hidden > 0 ? `<button class="more" data-more="${b.id}">还有 ${hidden} 门</button>` : ''}
+        ${expanded && chain.length > COLLAPSE_AT ? `<button class="more" data-more="${b.id}">收起</button>` : ''}
+        <div class="stepper" title="这类你已经修过的学分 —— 程序只补差额">
+          <button data-earned="${b.id}" data-d="-1">−</button>
+          <span class="v">已修 <b>${S.earned[b.id] || 0}</b></span>
+          <button data-earned="${b.id}" data-d="1">+</button>
+        </div>
+      </div>
+      <div class="slots" data-b="${b.id}">
+        ${slots || `<div class="no-slot">还没有候选，从左边点选加入</div>`}
+      </div>
+    </div>`;
+  }).join('');
+
+  $('#planCount').textContent = BUCKETS.reduce((n, b) => n + S.chains[b.id].length, 0) + ' 门';
+
+  $('#buckets').querySelectorAll('[data-del]').forEach(btn => {
+    btn.onclick = () => { S.chains[btn.dataset.del].splice(Number(btn.dataset.i), 1); render(); };
+  });
+  $('#buckets').querySelectorAll('[data-earned]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.earned;
+      const v = (S.earned[id] || 0) + Number(btn.dataset.d);
+      S.earned[id] = Math.max(0, Math.min(10, v));
+      render();
+    };
+  });
+  $('#buckets').querySelectorAll('[data-more]').forEach(btn => {
+    btn.onclick = () => { S.expanded[btn.dataset.more] = !S.expanded[btn.dataset.more]; render(); };
+  });
+}
+
+// 拖拽排序
+let drag = null;
+$('#buckets').addEventListener('dragstart', e => {
+  const slot = e.target.closest('.slot');
+  if (!slot) return;
+  drag = { b: slot.dataset.b, code: slot.dataset.code };
+  slot.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', slot.dataset.code);
+});
+$('#buckets').addEventListener('dragend', () => {
+  drag = null;
+  $('#buckets').querySelectorAll('.dragging,.drop-target,.drop').forEach(n =>
+    n.classList.remove('dragging','drop-target','drop'));
+});
+$('#buckets').addEventListener('dragover', e => {
+  if (!drag) return;
+  const slot = e.target.closest('.slot');
+  if (!slot) return;
+  e.preventDefault();
+  slot.classList.add('drop-target');
+});
+$('#buckets').addEventListener('dragleave', e => {
+  e.target.closest('.slot')?.classList.remove('drop-target');
+});
+$('#buckets').addEventListener('drop', e => {
+  if (!drag) return;
+  const slot = e.target.closest('.slot');
+  if (!slot) return;
+  e.preventDefault();
+
+  const from = S.chains[drag.b];
+  const idx = from.indexOf(drag.code);
+  if (idx >= 0) from.splice(idx, 1);
+
+  const toBucket = slot.dataset.b;
+  const list = S.chains[toBucket];
+  let at = Number(slot.dataset.i);
+  if (drag.b === toBucket && idx >= 0 && idx < at) at -= 1;
+  list.splice(Math.max(0, Math.min(list.length, at)), 0, drag.code);
+
+  drag = null;
+  render();
+});
+
+function render(){
+  renderChips();
+  renderPool();
+  renderBuckets();
+  renderSteps();
+}
+
+// 一键填充：每个类别按"2 学分优先 + 学校顺序"取前若干门兜底
+$('#btnAuto').onclick = () => {
+  let added = 0;
+  for (const b of BUCKETS) {
+    if (S.chains[b.id].length) continue;
+    const pool = S.catalog
+      .filter(c => b.accepts(c))
+      .sort((a, b2) => (b2.credits - a.credits) || a.code.localeCompare(b2.code));
+    const take = pool.slice(0, 12);
+    S.chains[b.id] = take.map(c => c.code);
+    added += take.length;
+  }
+  render();
+  toast(added ? `已填入 ${added} 门兜底候选` : '已经有候选了');
+};
+
+// ── 配置输出 ────────────────────────────────────────────────
+function buildConfig(){
+  const targets = [];
+  const buckets = [];
+  for (const b of BUCKETS) {
+    const ids = [];
+    S.chains[b.id].forEach((code, i) => {
+      const c = S.byCode.get(code);
+      if (!c) return;
+      const id = `${b.id}${i + 1}`;
+      ids.push(id);
+      targets.push({
+        id,
+        courseCode: { exact: [c.code] },
+        credits: c.credits,
+        priority: i,
+        _name: c.name,
+        _category: b.id,
+      });
+    });
+    buckets.push({
+      id: b.id,
+      label: b.label,
+      needCredits: Math.max(0, b.need - (S.earned[b.id] || 0)),
+      targets: ids,
+    });
+  }
+
+  const base = S.config ?? {};
+  const typed = $('#startAt')?.value;
+  // 空值就是「立即开始」。不能回落到 base 里的旧时间，否则点了"改为立即开始"等于没点。
+  const startAt = typed ? new Date(typed).toISOString() : null;
+
+  return {
+    ...base,
+    profile: base.profile ?? 'ggxxk-xsxkkc',
+    targets,
+    buckets,
+    strategy: { ...(base.strategy ?? {}), stopAfterSuccess: false },
+    schedule: { ...(base.schedule ?? {}), startAt },
+    safety: { ...(base.safety ?? {}), dryRun: true },
+  };
+}
+
+$('#btnPreview').onclick = () => {
+  const cfg = buildConfig();
+  const shown = { ...cfg, targets: cfg.targets.slice(0, 30) };
+  openDialog('将要保存的配置（targets 只显示前 30 条）', JSON.stringify(shown, null, 2));
+};
+
+async function saveConfig(){
+  const cfg = buildConfig();
+  const r = await fetch('/api/save', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ config: cfg }),
+  });
+  const d = await r.json();
+  if (d.ok) { S.config = cfg; toast('已保存'); return cfg; }
+  throw new Error(d.error || '保存失败');
+}
+
+$('#btnSave').onclick = async () => { try { await saveConfig(); } catch (e) { toast(e.message); } };
+$('#btnNext').onclick = async () => {
+  try { await saveConfig(); goStep(3); } catch (e) { toast(e.message); }
+};
+
+// ── 步骤 3 ──────────────────────────────────────────────────
+function renderSummary(){
+  $('#summary').innerHTML = BUCKETS.map(b => {
+    const need = stateNeed(b.id);
+    const n = S.chains[b.id].length;
+    const planned = chainCredits(b.id);
+    const done = need === 0;
+    return `<div class="sum" style="--c:${b.color}">
+      <div class="t"><span class="d"></span>${b.label}</div>
+      <div class="v">${done ? '—' : `需 ${need}`}<small>学分</small></div>
+      <div class="s">${done ? '已修满，跳过' : `${n} 门候选可选`}</div>
+    </div>`;
+  }).join('');
+
+  const sa = $('#startAt').value;
+  $('#startHint').textContent = sa
+    ? `到点自动开始，提前约 2 分钟进入预热`
+    : '未设定 —— 点了按钮立刻开始';
+
+  const ready = BUCKETS.every(b => stateNeed(b.id) === 0 || S.chains[b.id].length > 0);
+  $('#btnDry').disabled = !ready;
+  $('#btnLive').disabled = !ready;
+}
+
+$('#btnNow').onclick = () => {
+  $('#startAt').value = '';
+  saveConfigSilent();
+  renderSummary();
+  toast('已改为立即开始');
+};
+
+function saveConfigSilent(){
+  const cfg = buildConfig();
+  S.config = cfg;
+  fetch('/api/save', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ config: cfg }),
+  }).catch(() => {});
+}
+
+$('#startAt').addEventListener('change', () => { saveConfigSilent(); renderSummary(); });
+
+async function startRun(live){
+  const ready = BUCKETS.every(b => stateNeed(b.id) === 0 || S.chains[b.id].length > 0);
+  if (!ready) return toast('还有类别没有候选课程');
+  if (live) {
+    const ok = confirm(
+      '确定要正式抢课吗？\n\n' +
+      '程序会真的向教务系统提交选课请求。\n' +
+      '抢到的课会在你的课表里，如需退选要自己上教务系统操作。\n\n' +
+      '点「确定」立即开始。'
+    );
+    if (!ok) return;
+  }
+
+  $('#resultBox').innerHTML = '';
+  try {
+    await saveConfig();
+  } catch (e) {
+    return toast(e.message);
+  }
+
+  const r = await fetch('/api/run', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ live }),
+  });
+  const d = await r.json();
+  if (!d.ok) return toast(d.error || '启动失败');
+
+  S.running = true;
+  renderSteps();
+  clearLogs();
+  pushLog(live ? '已启动正式抢课，等待响应…' : '已启动试运行，等待响应…', 'info');
+}
+
+$('#btnDry').onclick = () => startRun(false);
+$('#btnLive').onclick = () => startRun(true);
+
+$('#btnStop').onclick = async () => {
+  await fetch('/api/stop', { method: 'POST' });
+  toast('正在停止…');
+};
+
+function renderResult(r){
+  if (!r) return;
+  const box = $('#resultBox');
+  if (r.outcome === 'error') {
+    box.innerHTML = `<div class="msg show err" style="margin-top:14px">${esc(r.message || '运行出错')}</div>`;
+    return;
+  }
+  const rows = r.summary?.rows ?? [];
+  const head = r.outcome === 'success'
+    ? `<div class="msg show ok" style="margin-top:14px">${r.live ? '抢课完成' : '试运行通过'}</div>`
+    : `<div class="msg show warn" style="margin-top:14px">结束状态：${esc(r.outcome)}</div>`;
+
+  const lines = rows.slice(0, 40).map(row => {
+    const ok = /成功|已选|SUCCESS/i.test(String(row.status));
+    const bad = /失败|冲突|拒绝|FAIL/i.test(String(row.status));
+    return `<div class="res-row">
+      <span class="st${ok ? ' ok' : bad ? ' bad' : ''}">${esc(row.status)}</span>
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(row.目标)}</span>
+      <span style="color:var(--faint);font-size:11px">${esc(row.结果 ?? '')}</span>
+    </div>`;
+  }).join('');
+
+  box.innerHTML = head + (lines || '');
+}
+
+// ── 日志流 ──────────────────────────────────────────────────
+function pushLog(text, level){
+  const box = $('#logs');
+  box.querySelector('.con-empty')?.remove();
+
+  const line = document.createElement('div');
+  line.className = 'logline' + (level === 'warn' ? ' warn' : level === 'error' ? ' error' : '');
+
+  // 服务端日志形如：[12:30:01.123] +   0.0s #0001 INFO  正文
+  const m = /^\[([\d:.]+)\]\s*\+?\s*[\d.]+s\s+#\d+\s+(\w+)\s+([\s\S]*)$/.exec(text);
+  const ts = m ? m[1].slice(0, 8) : new Date().toTimeString().slice(0, 8);
+  const body = m ? m[3] : text;
+
+  line.innerHTML = `<span class="ts">${esc(ts)}</span><span class="tx">${esc(body)}</span>`;
+  box.appendChild(line);
+
+  // 只保留最近 400 行，避免长时间运行后浏览器变卡
+  while (box.children.length > 400) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+
+function clearLogs(){
+  $('#logs').innerHTML = '<div class="con-empty">等待日志…</div>';
+}
+$('#btnClearLog').onclick = clearLogs;
+
+function connectEvents(){
+  const es = new EventSource('/api/events');
+  es.onmessage = ev => {
+    let d;
+    try { d = JSON.parse(ev.data); } catch { return; }
+
+    if (d.type === 'log') {
+      pushLog(d.line, d.level);
+      return;
+    }
+    if (d.type === 'phase') {
+      S.running = d.phase === 'running';
+      $('#conLive').classList.toggle('on', S.running);
+      $('#btnStop').style.display = S.running ? 'grid' : 'none';
+      $('#conFoot').textContent = d.message || (d.phase === 'running' ? '运行中…' : '就绪');
+      renderSteps();
+      if (d.phase === 'needs-captcha') {
+        $('#captchaBox').classList.add('show');
+      }
+      return;
+    }
+    if (d.type === 'result') {
+      S.lastResult = d.result;
+      renderResult(d.result);
+      return;
+    }
+  };
+  es.onerror = () => {
+    // 服务重启后自动重连，EventSource 默认会重试，这里只更新提示
+    $('#conFoot').textContent = '与本地服务断开，正在重连…';
+  };
+}
+
+// ── 弹层 ────────────────────────────────────────────────────
+function openDialog(title, body){
+  $('#dlgTitle').textContent = title;
+  $('#dlgBody').textContent = body;
+  $('#mask').classList.add('show');
+}
+function closeDialog(){ $('#mask').classList.remove('show'); }
+$('#dlgClose').onclick = closeDialog;
+$('#dlgOk').onclick = closeDialog;
+$('#mask').onclick = e => { if (e.target.id === 'mask') closeDialog(); };
+$('#dlgCopy').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($('#dlgBody').textContent);
+    toast('已复制');
+  } catch { toast('复制失败，请手动选择'); }
+};
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDialog(); });
+
+// ── 启动 ────────────────────────────────────────────────────
+document.querySelectorAll('[data-go]').forEach(btn => {
+  btn.onclick = () => {
+    const n = Number(btn.dataset.go);
+    if (n === 1 && !S.session?.exists) { goStep(1); return; }
+    if (n === 1) { goStep(1); return; }
+    goStep(n);
+  };
+});
+
+renderSteps();
+// ?nostream=1 时不连长连接，用于离线预览/截图（EventSource 会让页面永不进入空闲态）
+if (!/[?&]nostream=1/.test(location.search)) connectEvents();
+boot();
+</script>
+</body>
+</html>
