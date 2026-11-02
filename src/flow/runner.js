@@ -51,6 +51,10 @@ export class Runner {
      * 分桶调度：一个桶 = 一个"必须满足的类别"（如绿色文明 2 学分）。
      * 不配置时完全走旧的单桶路径，行为一字不变。
      * targets 统一归一成目标 id 字符串，配置里写 id 或对象都接受。
+     *
+     * 注意：满员降级（fullFallbackAfterSec）在分桶模式下**不适用**，故 cycleBuckets
+     * 不走 applyDemotion —— 每个桶只有一个决策位，桶内候选本就按"有名额优先"排序，
+     * 降权改变不了结果。配了这个键由 doctor 报警，避免让人误以为开了保险。
      */
     this.buckets = (opts.buckets ?? []).map((b) => ({
       ...b,

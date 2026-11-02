@@ -197,6 +197,11 @@ export class CookieJar {
     return this.cookies.size;
   }
 
+  /** 所有 Cookie 名（排查"到底带上了什么"时用；不含值，避免误把凭证打到日志里）。 */
+  names() {
+    return [...new Set([...this.cookies.values()].map((c) => c.name))];
+  }
+
   /** 导出为 Playwright storageState 的 cookies 数组格式，便于与浏览器会话互转。 */
   toStorageState() {
     return [...this.cookies.values()].map((c) => ({

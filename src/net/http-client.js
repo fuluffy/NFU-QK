@@ -17,6 +17,8 @@
 import http from 'node:http';
 import https from 'node:https';
 import dns from 'node:dns';
+import fs from 'node:fs';
+import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { CookieJar } from './cookiejar.js';
 import { Clock } from './clock.js';
@@ -35,6 +37,28 @@ const DEFAULT_UA =
  * 注意不能把 `/authserver/login` 也拦掉：那是正常的登录跳转。
  */
 const LOGOUT_REDIRECT_RE = /\/authserver\/logout(?:[?#/]|$)|\/sso\/logout(?:[?#/]|$)|[?&]_eventId=logout/i;
+
+/**
+ * 原始响应留存。
+ *
+ * 为什么抢课这种一次性场景必须有它：实跑时出现"列表 0 条""提交被拒"这类问题，
+ * 唯一能当场定位的依据就是服务端到底回了什么。日志只记摘要不够 —— 字段改名、
+ * 返回结构从 aaData 换成 rows、错误信息藏在 tsxx 里，都得看原文。
+ *
+ * 隐私边界：Cookie 与请求头一律不落盘；表单里的 password/pwd/ticket 之类脱敏；
+ * 响应体只保留前 20KB（判断结构够用），并且只留文本类响应（跳过验证码图片）。
+ */
+const SECRET_KEY_RE = /pass|pwd|ticket|token|cookie/i;
+const TEXTUAL_CT_RE = /json|html|text|xml|javascript/i;
+
+function redactForm(form) {
+  if (!form || typeof form !== 'object') return form;
+  const out = {};
+  for (const [k, v] of Object.entries(form)) {
+    out[k] = SECRET_KEY_RE.test(k) ? '***' : v;
+  }
+  return out;
+}
 
 export class NetworkError extends Error {
   constructor(message, { code, url, kind, cause, retryable } = {}) {
@@ -148,6 +172,10 @@ export class HttpClient {
     this.logger = opts.logger ?? null;
     this.sleep = opts.sleep ?? sleep;
     this.rng = opts.rng ?? Math.random;
+    /** 原始响应留存目录（null=不留存）。CLI 的 --dump 与 config.net.dumpDir 都会来这里。 */
+    this.dumpDir = opts.dumpDir ?? null;
+    this.dumpLimitBytes = opts.dumpLimitBytes ?? 20_000;
+    this._dumpReady = false;
 
     if (opts.proxy) {
       throw new NetworkError('尚未实现代理支持（校内直连场景不需要）。如需校外访问请先走系统级代理。', {
@@ -178,6 +206,51 @@ export class HttpClient {
     };
 
     this.stats = { requests: 0, retries: 0, errors: 0, bytes: 0, timeouts: 0 };
+  }
+
+  /**
+   * 把一次请求的往返追加写入 dumpDir/requests.ndjson。
+   *
+   * 用同步写：单并发下每轮只有 1~3 次请求，追几十 KB 不影响节奏，
+   * 却能保证「程序被 Ctrl-C 掐死时，已经发生的请求都还在盘上」——
+   * 而现场排障最需要的恰恰是进程死掉前的最后几个响应。
+   */
+  _dump(label, spec, res, err) {
+    if (!this.dumpDir) return;
+    try {
+      if (!this._dumpReady) {
+        fs.mkdirSync(this.dumpDir, { recursive: true });
+        this._dumpReady = true;
+      }
+      const ct = String(res?.headers?.['content-type'] ?? '');
+      const textual = !res || !ct || TEXTUAL_CT_RE.test(ct);
+      let body = textual ? String(res?.text ?? '') : '';
+      let truncated = false;
+      if (body.length > this.dumpLimitBytes) {
+        body = body.slice(0, this.dumpLimitBytes);
+        truncated = true;
+      }
+      const rec = {
+        t: new Date().toISOString(),
+        label,
+        method: (spec.method ?? 'GET').toUpperCase(),
+        path: spec.path ?? spec.url,
+        status: res?.status ?? null,
+        finalUrl: res?.url ?? null,
+        contentType: ct || null,
+        redirects: res?.redirects ?? spec._chain ?? [],
+        ms: res?.ms ?? null,
+        form: redactForm(spec.form),
+        json: spec.json,
+        body: textual ? body : `[非文本响应 ${res?.buffer?.length ?? 0}B，未留存]`,
+        bodyTruncated: truncated,
+        error: err ? { kind: err.kind ?? null, code: err.code ?? null, message: err.message } : null,
+      };
+      fs.appendFileSync(path.join(this.dumpDir, 'requests.ndjson'), `${JSON.stringify(rec)}\n`, 'utf8');
+    } catch (e) {
+      // 留存失败绝不能影响抢课本身
+      this.logger?.debug(`原始响应留存失败：${e.message ?? e}`);
+    }
   }
 
   /** 释放底层连接。 */
@@ -270,6 +343,7 @@ export class HttpClient {
         this.logger?.debug(
           `${label} → ${res.status} ${res.text.length}B ${res.ms}ms${attempt > 0 ? ` (重试${attempt}次)` : ''}`,
         );
+        this._dump(label, spec, res, null);
         return res;
       } catch (err) {
         lastError = err;
@@ -279,6 +353,7 @@ export class HttpClient {
         if (!canRetry) {
           this.stats.errors += 1;
           this.logger?.warn(`${label} → 失败：${describeError(err)}${retryMode === 'none' ? '（该请求禁止重试）' : ''}`);
+          this._dump(label, spec, null, err);
           throw err;
         }
 

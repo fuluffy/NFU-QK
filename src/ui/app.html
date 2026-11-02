@@ -551,6 +551,7 @@ button{font:inherit}
             <h2>我要的类别</h2>
             <span class="count" id="planCount">—</span>
             <span class="sp"></span>
+            <button class="btn sm ghost" id="btnClearPlan">一键清空</button>
             <button class="btn sm ghost" id="btnAuto">一键填充</button>
           </div>
           <div class="col-body" id="buckets" style="padding:0"></div>
@@ -1125,6 +1126,17 @@ function render(){
   renderBuckets();
   renderSteps();
 }
+
+// 一键清空：方案从零开始。不做默认全选 —— 抢到的课要上一学期，
+// 替用户预选等于替他做决定；想省事的人再点「一键填充」。
+$('#btnClearPlan').onclick = () => {
+  const n = BUCKETS.reduce((s, b) => s + S.chains[b.id].length, 0);
+  if (!n) return toast('方案已经是空的');
+  if (!confirm(`清空全部 ${n} 门候选？\n\n清空后需要重新从左边选课，或者点「一键填充」。`)) return;
+  for (const b of BUCKETS) S.chains[b.id] = [];
+  render();
+  toast('已清空方案');
+};
 
 // 一键填充：每个类别按"2 学分优先 + 学校顺序"取前若干门兜底
 $('#btnAuto').onclick = () => {

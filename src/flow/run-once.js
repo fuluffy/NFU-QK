@@ -55,6 +55,11 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
   logger.info('═══ 开始运行 ═══');
   logger.info(`profile：${config.profile ?? profile.name ?? '?'}（${profile.label ?? ''}）`);
   logger.info(`模式：${dryRun ? '试运行（只匹配，不提交）' : '正式抢课（会真的提交！）'}`);
+  // config.safety.dryRun 只作"默认值"，命令行/界面一旦显式指定 live，就以显式为准。
+  // 但这个覆盖必须说出来 —— 否则"配置里明明写着干跑"会变成一次事故。
+  if (live && config.safety?.dryRun === true) {
+    logger.warn('⚠ 配置里 safety.dryRun=true，但本次已按实跑启动 —— 以显式指定为准，会真的提交');
+  }
 
   if (String(profile._status ?? '').startsWith('ASSUMED') && !force) {
     throw new ConfigError(
@@ -79,8 +84,15 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
     throw err;
   }
 
-  if (!jar.has('JSESSIONID')) {
-    logger.warn('会话中没有 JSESSIONID，几乎肯定是未登录状态 —— 建议重新登录');
+  // 会话是否"看起来已登录"，判据是**业务侧**的 Cookie（bzb_*），不是 JSESSIONID。
+  // 苏迪/金智改版后 JSESSIONID 常常延迟下发甚至整场都没有，用它判会误伤有效会话；
+  // 反过来 bzb_* / route / SERVERID 缺失才是真的没登录或粘性会话丢了。
+  const names = jar.names();
+  const hasBzb = names.some((n) => n.startsWith('bzb_'));
+  if (!names.length) {
+    logger.warn('会话里没有任何 Cookie —— 几乎肯定是未登录状态，建议重新登录');
+  } else if (!hasBzb && !jar.has('JSESSIONID')) {
+    logger.warn(`会话里有 ${names.length} 个 Cookie，但没有 bzb_* / JSESSIONID —— 若随后收到登录页，请重新登录`);
   }
   if (!jar.has('route') && !jar.has('SERVERID')) {
     logger.warn('会话中没有 route / SERVERID —— 正方是粘性会话，缺它会导致会话随机失效');
@@ -88,6 +100,11 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
 
   const net = config.net ?? {};
   if (net.ipv4First !== false) applyIpv4First();
+
+  const dumpDir = net.dumpDir ? path.resolve(root, net.dumpDir) : null;
+  if (dumpDir) {
+    logger.info(`原始响应留存：${dumpDir}/requests.ndjson（排障用，含课程列表原文；不含 Cookie 与密码）`);
+  }
 
   const client = new HttpClient({
     baseUrl: profile.baseUrl,
@@ -99,6 +116,7 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
     backoff: net.backoff,
     concurrency: net.concurrency,
     rejectUnauthorized: net.rejectUnauthorized ?? true,
+    dumpDir,
     logger,
   });
 

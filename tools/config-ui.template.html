@@ -461,8 +461,8 @@ code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.92em}
       <h2>我的方案</h2>
       <span class="count" id="planCount">0 门</span>
       <div class="spacer"></div>
-      <button class="btn sm" id="btnReset">重置推荐</button>
-      <button class="btn sm" id="btnClearAll">清空</button>
+      <button class="btn sm" id="btnReset">推荐候选</button>
+      <button class="btn sm" id="btnClearAll">一键清空</button>
     </div>
     <div id="buckets" class="plan-body"></div>
   </section>
@@ -538,6 +538,16 @@ const state = {
 // 二十几门全铺开会把后面的类别挤到屏幕外。
 const COLLAPSE_AT = 3;
 for (const b of BUCKETS) state.chains[b.id] = [...(INITIAL[b.id] || [])];
+
+// 「推荐候选」按需计算：同样的排序规则（2 学分优先 + 代码），但**只在用户点按钮时**才填，
+// 页面打开时一律是空方案。抢到的课要上一学期，替他预选等于替他做决定。
+const RECOMMEND = {};
+for (const b of BUCKETS) {
+  RECOMMEND[b.id] = COURSES
+    .filter(b.accepts)
+    .sort((x, y) => y.credits - x.credits || x.code.localeCompare(y.code))
+    .map(c => c.code);
+}
 
 // ── 工具 ────────────────────────────────────────────────────
 const $ = s => document.querySelector(s);
@@ -918,14 +928,21 @@ $('#search').addEventListener('input', e => { state.q = e.target.value.trim(); r
 $('#btnClearSearch').onclick = () => { $('#search').value = ''; state.q = ''; renderPool(); $('#search').focus(); };
 
 $('#btnReset').onclick = () => {
-  for (const b of BUCKETS) state.chains[b.id] = [...(INITIAL[b.id] || [])];
+  const total = BUCKETS.reduce((n, b) => n + RECOMMEND[b.id].length, 0);
+  if (total && !confirm(
+    `按推荐规则填入 ${total} 门候选（每个类别全部可计入的课，2 学分优先）？\n\n` +
+    `这只是"兜底下限"，不是帮你做决定 —— 填完请把不想上的删掉。`)) return;
+  for (const b of BUCKETS) state.chains[b.id] = [...RECOMMEND[b.id]];
   render();
-  toast('已恢复推荐方案（全部候选，2 学分优先）');
+  toast(`已填入 ${total} 门推荐候选，可继续删改`);
 };
 $('#btnClearAll').onclick = () => {
-  if (!confirm('清空三个类别的全部候选？')) return;
+  const total = BUCKETS.reduce((n, b) => n + state.chains[b.id].length, 0);
+  if (!total) return toast('方案已经是空的');
+  if (!confirm(`清空三个类别的全部 ${total} 门候选？`)) return;
   for (const b of BUCKETS) state.chains[b.id] = [];
   render();
+  toast('已清空方案 —— 请从左边重新选课');
 };
 
 $('#btnHint').onclick = () => openModal('怎么用', HINT);
@@ -935,6 +952,10 @@ const HINT = `这个页面不连服务器，改完只会下载一个 config.ggxx
 1. 左边是课程库（学校官方课表里开课学期带「秋」的 90 门）。
    点课程卡片即可加入方案；再点一次移出。
    卡片左边的色条表示它属于哪个类别，灰色的「不计学分」课需要手动指定类别。
+
+   ⚠ 页面打开时方案是**空的**，不替你预选任何课。
+   想省事可以点右上「推荐候选」一次性填入，再把不想上的删掉；
+   随时可以用「一键清空」从零开始。
 
 2. 右边每个类别是一条「候选链」：
    程序按 1、2、3 的顺序往下试，前一门满员才试下一门。

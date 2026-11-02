@@ -83,7 +83,7 @@ const KNOWN_KEYS = {
   schedule: ['startAt', 'prewarmSec', 'highFreqBeforeSec', 'highFreqIntervalMs', 'intervalMs', 'maxRunMinutes'],
   net: [
     'proxy', 'concurrency', 'connectTimeoutMs', 'readTimeoutMs', 'maxRetries',
-    'maxRedirects', 'backoff', 'ipv4First', 'rejectUnauthorized', 'pinnedCertFingerprint',
+    'maxRedirects', 'backoff', 'ipv4First', 'rejectUnauthorized', 'pinnedCertFingerprint', 'dumpDir',
   ],
   'net.backoff': ['baseMs', 'factor', 'maxMs', 'jitter'],
   safety: ['dryRun', 'maxSubmitsPerMinute'],
@@ -132,6 +132,27 @@ function auditConfig(config) {
   }
 
   issues.push(...auditBuckets(config));
+  issues.push(...auditStrategy(config));
+  return issues;
+}
+
+/**
+ * 策略项体检。
+ *
+ * `fullFallbackAfterSec` 的设计前提是"多个目标争一个决策位"：满员太久就降权，
+ * 把决策位让给别的目标。分桶模式里每个桶**只有一个决策位**，桶内候选本来就按
+ * "有名额优先"排序，降权改变不了任何结果 —— 它只会让日志里的"已满员"从这门换成那门。
+ * 与其留着让人误以为开了保险，不如在 doctor 里当面说清。
+ */
+function auditStrategy(config) {
+  const issues = [];
+  if (!Array.isArray(config.buckets) || !config.buckets.length) return issues;
+  if (Number(config.strategy?.fullFallbackAfterSec ?? 0) > 0) {
+    issues.push(
+      'strategy.fullFallbackAfterSec —— 分桶模式下不生效（每个桶只有一个决策位，' +
+        '桶内已按「有名额优先」排序，降权不会改变结果）。请设为 0 或删掉',
+    );
+  }
   return issues;
 }
 
@@ -387,6 +408,14 @@ async function cmdRun(args) {
   if (net.rejectUnauthorized === false) {
     logger.warn('⚠ 已关闭 TLS 证书校验（net.rejectUnauthorized=false）。');
     logger.warn('  风险：校网内理论上存在中间人可能。');
+  }
+
+  // --dump：把每个请求的原始响应落盘，出事时能照着原文改 profile。
+  // 默认不落盘 —— 里面是完整的教务系统数据，没必要留在硬盘上。
+  if (args.dump) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    config.net = { ...net, dumpDir: net.dumpDir ?? `recon/live-${stamp}` };
+    logger.info(`原始响应留存：${path.resolve(ROOT, config.net.dumpDir)}/requests.ndjson`);
   }
 
   const { runOnce, ConfigError } = await import('./flow/run-once.js');
@@ -872,6 +901,8 @@ run 选项：
   --profile <名称>      覆盖配置里的 profile
   --live                实跑（会真的选课）—— 极度谨慎
   --force               即使 profile 仍为 ASSUMED 也强行运行（不推荐）
+  --dump                把每个请求的原始响应存到 recon/live-<时间>/requests.ndjson
+                        （排障用：列表 0 条、提交被拒时看服务端到底回了什么）
   --verbose
 
 示例：

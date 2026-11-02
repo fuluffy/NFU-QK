@@ -4,13 +4,16 @@
  * 为什么要有这一步：浏览器用 file:// 打开页面时，fetch 本地 JSON 会被 CORS 拦掉，
  * 所以课程库必须**内联**进 HTML。这样双击就能用，不需要起服务器。
  *
- * 用法：node tools/build-config-ui.mjs [--no-prefill]
+ * 默认**不预填**任何候选：抢到的课要上一学期，替用户预选等于替他做决定。
+ * 想要打开即预填（旧行为）请显式加 --prefill。
+ *
+ * 用法：node tools/build-config-ui.mjs [--prefill]
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const prefill = !process.argv.includes('--no-prefill');
+const prefill = process.argv.includes('--prefill');
 
 const catalog = JSON.parse(await readFile(path.join(ROOT, 'data/catalog-2026-autumn.json'), 'utf8'));
 const courses = catalog.courses;
@@ -45,6 +48,8 @@ const n = html.length;
 console.log(`已写入 ${out}（${(n / 1024).toFixed(0)} KB）`);
 if (prefill) {
   console.log(
-    `  预填候选：绿色文明 ${chains.green.length} 门｜创新创业 ${chains.innov.length} 门｜艺术审美 ${chains.art.length} 门`,
+    `  已预填候选：绿色文明 ${chains.green.length} 门｜创新创业 ${chains.innov.length} 门｜艺术审美 ${chains.art.length} 门`,
   );
+} else {
+  console.log('  未预填候选：页面打开是空方案（用户自己选，或用「推荐候选」按钮）');
 }

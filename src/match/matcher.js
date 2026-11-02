@@ -108,18 +108,30 @@ export function matchItem(item, target, fields = {}) {
   return { hit, reasons, score };
 }
 
+/** 把可能是空串 / "12" / 12 / null 的名额字段转成数字；拿不到有效值返回 null。 */
+function toCount(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  const text = String(raw).trim();
+  if (!text) return null; // 空串是最常见的情况：教务系统的容量字段常常留空
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
  * 判断教学班是否"还有名额"。
- * 字段没配置或值不是数字时，一律视为可选 —— 宁可多提交一次让服务端裁决，
- * 也不要因为解析不出来而错过放出的名额。
+ *
+ * 判定必须宽松，因为**把"不知道"当成"满员"的代价是全盘皆输**：
+ * 公选课的 pkrs（容量）在部分教学班上是空串甚至 0，若按 used < cap 直接算，
+ * 结果恒为 false —— 程序会认为所有课都满员，整晚一次都不提交，日志还很安静。
+ * 所以凡是解析不出有效容量（缺失 / 空串 / 非数字 / <=0）一律视为"可能有名额"，
+ * 宁可多提交一次让服务端裁决，也不要因为解析不出来而错过放出的名额。
  */
 export function isAvailable(item, fields = {}) {
-  const capRaw = extractField(item, fields.capacity ?? 'jxbrl');
-  const usedRaw = extractField(item, fields.enrolled ?? 'yxzrs');
-  const cap = Number(capRaw);
-  const used = Number(usedRaw);
-  if (capRaw === undefined || usedRaw === undefined) return true;
-  if (!Number.isFinite(cap) || !Number.isFinite(used)) return true;
+  const cap = toCount(extractField(item, fields.capacity ?? 'jxbrl'));
+  const used = toCount(extractField(item, fields.enrolled ?? 'yxzrs'));
+  if (cap === null || cap <= 0) return true;
+  if (used === null || used < 0) return true;
   return used < cap;
 }
 

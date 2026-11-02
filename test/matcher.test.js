@@ -89,6 +89,22 @@ test('isAvailable 依据 容量/已选人数 判断；字段缺失时不阻拦',
   assert.equal(isAvailable({ kcmc: 'x' }, FIELDS), true, '拿不到容量信息时宁可多试一次');
 });
 
+test('isAvailable 把"容量未知"当成可选，而不是当成满员', () => {
+  // 公选课实测里 pkrs 常是空串或 0。旧实现 Number('')=0 → 0 < 0 为 false →
+  // 所有课都被判成满员，程序整晚一次都不提交，而日志只会重复"已满员"。
+  const fields = { capacity: 'pkrs', enrolled: 'xkrs' };
+  assert.equal(isAvailable({ pkrs: '', xkrs: '' }, fields), true, '空串容量 = 未知');
+  assert.equal(isAvailable({ pkrs: '0', xkrs: '0' }, fields), true, '容量 0 = 未知（不是"没名额"）');
+  assert.equal(isAvailable({ pkrs: '  ', xkrs: '12' }, fields), true, '空白容量 = 未知');
+  assert.equal(isAvailable({ pkrs: '--', xkrs: '12' }, fields), true, '非数字容量 = 未知');
+  assert.equal(isAvailable({ pkrs: '30', xkrs: '' }, fields), true, '已选人数未知时不阻拦');
+  assert.equal(isAvailable({ pkrs: '30', xkrs: '-1' }, fields), true, '已选人数是脏数据时不阻拦');
+  assert.equal(isAvailable({ pkrs: '30', xkrs: '30' }, fields), false, '真的满了要认出来');
+  assert.equal(isAvailable({ pkrs: '30', xkrs: '31' }, fields), false, '超额同样算满');
+  assert.equal(isAvailable({ pkrs: '30', xkrs: '29' }, fields), true);
+  assert.equal(isAvailable({ pkrs: 30, xkrs: 12 }, fields), true, '数字类型也要支持');
+});
+
 test('selectBest：余量优先于优先级（默认要求有余量）', () => {
   const targets = [
     { id: 'P0', priority: 0, courseName: { include: ['羽毛球'] } },
