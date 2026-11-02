@@ -1,0 +1,3 @@
+# Windows 批处理必须用 CRLF，否则括号块与 goto 会解析失败
+*.cmd text eol=crlf
+*.bat text eol=crlf
