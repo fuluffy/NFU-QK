@@ -229,7 +229,13 @@ async function cmdSimulate(args) {
     return 1;
   }
 
-  const profile = await loadProfile(args.profile ?? 'pe');
+  // Mock 只实现了公选课那套 zzxk 端点（tools/mock-server.js 的 PATHS），
+  // 而生产 pe.json 走的是体育课的 xsxkkc 端点 —— 用 pe.json 跑模拟会一条课程都拿不到。
+  // 所以默认用与之配套的 fixture profile；要给其它 profile 演练时用 --profile 显式指定。
+  const profile = await loadProfile(
+    args.profile ?? path.join(ROOT, 'test', 'fixtures', 'profile-mock-pe.json'),
+  );
+  if (args.profile) logger.info(`profile：${args.profile}（自定义，需与 Mock 端点匹配）`);
   const dryRun = !args.live;
   const targetKeyword = args.target ?? scenario.target ?? '篮球';
   const mockOpts = { ...scenario.mock, latencyMs: scenario.mock.latencyMs ?? 8 };
