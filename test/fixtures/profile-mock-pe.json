@@ -1,0 +1,113 @@
+{
+  "name": "mock-pe",
+  "label": "测试用：对应 tools/mock-server.js 的假选课系统",
+  "_status": "TEST-FIXTURE",
+  "_notes": [
+    "测试必须自成一体，不能依赖 src/flow/profiles/ 下的生产 profile。",
+    "曾经因为把 pe.json 换成真实南林接口，导致 10 个端到端测试全挂 —— 那次教训换来了这个文件。",
+    "这里的端点必须与 tools/mock-server.js 的 PATHS 保持一致。"
+  ],
+  "baseUrl": "http://127.0.0.1",
+  "headers": {
+    "x-requested-with": "XMLHttpRequest"
+  },
+  "defaults": {
+    "kklxdm": "TY",
+    "rwlx": "2",
+    "xkly": "0"
+  },
+  "matchFields": {
+    "name": "kcmc",
+    "code": "kch_id",
+    "teacher": "jsxx",
+    "jxbId": "jxb_id",
+    "xkkzId": "xkkz_id",
+    "capacity": "jxbrl",
+    "enrolled": "yxzrs"
+  },
+  "sessionExpired": {
+    "bodyMatches": "name=[\"']?username|统一身份认证|用户登录",
+    "urlMatches": "authserver|LoginToXk|/cas/login"
+  },
+  "steps": [
+    {
+      "id": "list",
+      "label": "mock/可选课程列表",
+      "method": "POST",
+      "path": "/jsxsd/xsxk/zzxkyzb_cxZzxkYzbPartDisplay.html",
+      "body": {
+        "$merge": [
+          "templates",
+          {
+            "kklxdm": "${defaults.kklxdm}",
+            "rwlx": "${defaults.rwlx}",
+            "xkly": "${defaults.xkly}",
+            "kspage": 1,
+            "jspage": 100
+          }
+        ]
+      },
+      "extract": { "items": "$.tmpList[*]" }
+    },
+    {
+      "id": "detail",
+      "label": "mock/展开教学班详情（换取加密凭证）",
+      "method": "POST",
+      "path": "/jsxsd/xsxk/zzxkyzbjk_cxJxbWithKchZzxkYzb.html",
+      "body": {
+        "$merge": [
+          "templates",
+          {
+            "kch_id": "${item.kch_id}",
+            "xkkz_id": "${item.xkkz_id}",
+            "kklxdm": "${defaults.kklxdm}"
+          }
+        ]
+      },
+      "extract": { "doJxbId": "$.do_jxb_id" }
+    },
+    {
+      "id": "probe",
+      "label": "mock/前置探针",
+      "method": "POST",
+      "path": "/jsxsd/xsxk/zzxkyzb_cxXkTitleMsg.html",
+      "body": {
+        "$merge": ["templates", { "kch_id": "${item.kch_id}" }]
+      },
+      "gate": { "path": "$.flag", "eq": "1" }
+    },
+    {
+      "id": "submit",
+      "label": "mock/提交选课",
+      "method": "POST",
+      "retry": "none",
+      "path": "/jsxsd/xsxk/zzxkyzbjk_xkBcZyZzxkYzb.html",
+      "body": {
+        "$merge": [
+          "templates",
+          {
+            "jxb_ids": "${detail.doJxbId}",
+            "kch_id": "${item.kch_id}",
+            "kcmc": "${item.kcmc}",
+            "xkkz_id": "${item.xkkz_id}",
+            "rwlx": "${defaults.rwlx}",
+            "sxbj": "1"
+          }
+        ]
+      },
+      "success": { "path": "$.flag", "eq": "1" },
+      "conflictWhen": { "path": "$.msg", "matches": "冲突|时间" },
+      "messageFrom": "$.msg"
+    },
+    {
+      "id": "verify",
+      "label": "mock/已选课程列表",
+      "method": "POST",
+      "path": "/jsxsd/xsxk/zzxkyzb_cxZzxkYzbChoosedDisplay.html",
+      "body": {
+        "$merge": ["templates", { "kklxdm": "${defaults.kklxdm}" }]
+      },
+      "extract": { "items": "$.tmpList[*]" }
+    }
+  ]
+}

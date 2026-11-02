@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>统一身份认证</title>
+</head>
+<body>
+<div class="login-wrap">
+  <form id="casLoginForm" action="/authserver/login?service=http%3A%2F%2F127.0.0.1%3A1%2Fjsxsd%2F" method="post">
+    <input type="text" name="username" id="username" placeholder="用户名" value="" autocomplete="off">
+    <input type="password" id="password" placeholder="密码" value="">
+    <input type="text" name="password" id="passwordEncrypt" value="" style="display:none">
+    <input type="hidden" name="lt" value="LT-1325230-BSedOctSKI77pSaFdb33ZdGfc0gm6c1789644963255-MrX5-cas">
+    <input type="hidden" name="dllt" value="userNamePasswordLogin">
+    <input type="hidden" name="execution" value="e1s1">
+    <input type="hidden" name="_eventId" value="submit">
+    <input type="hidden" name="rmShown" value="1">
+    <input type="hidden" id="pwdDefaultEncryptSalt" value="VoSuhq3VzLxPM3re">
+    <input type="submit" value="登录">
+  </form>
+
+  <form id="casDynamicLoginForm" action="/authserver/login?service=http%3A%2F%2F127.0.0.1%3A1%2Fjsxsd%2F" method="post">
+    <input type="text" name="username" id="username" placeholder="用户名">
+    <input type="text" name="captchaResponse" id="dynamicCodeCaptchaResponse" placeholder="验证码">
+    <input type="text" name="dynamicCode" id="dynamicCode" placeholder="动态码">
+    <input type="button" id="getDynamicCode" value="获取动态码">
+    <input type="hidden" name="lt" value="LT-1325230-BSedOctSKI77pSaFdb33ZdGfc0gm6c1789644963255-MrX5-cas">
+    <input type="hidden" name="dllt" value="dynamicLogin">
+    <input type="hidden" name="execution" value="e1s1">
+    <input type="hidden" name="_eventId" value="submit">
+    <input type="hidden" name="rmShown" value="1">
+    <input type="hidden" id="dynamicPwdEncryptSalt" value="3b9AvNvFaQKs3sUe">
+  </form>
+
+  <div id="captcha-id">
+    <img id="captchaImg" src="captcha.html?ts=1">
+  </div>
+</div>
+<script src="/authserver/custom/js/encrypt.js"></script>
+<script>
+  var pwdDefaultEncryptSalt = "VoSuhq3VzLxPM3re";
+</script>
+</body>
+</html>

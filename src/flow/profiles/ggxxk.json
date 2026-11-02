@@ -1,0 +1,120 @@
+{
+  "name": "ggxxk",
+  "label": "公选课（通识选修）",
+  "school": "NJFU",
+  "_status": "ASSUMED —— 端点/字段名均为推断值，Phase 1 真机取证后必须逐项校正",
+  "_notes": [
+    "公选课走「网上选课（预选）」以及后续正选/补退选轮次，端点与体育课同属一套 zzxk 流水线，",
+    "差异主要在 kklxdm（课程类别码）与选课轮次 xkkz_id。",
+    "⚠️ 若预选为「志愿+抽签」制，则预选阶段不存在先到先得，本 profile 的价值应聚焦在正选/补退选阶段。",
+    "此项必须先查清教务处通知再定优先级。"
+  ],
+  "baseUrl": "https://jwxt.njfu.edu.cn",
+  "entryPath": "/jsxsd/xsxk/xklc_list",
+  "gnmkdm": "N253512",
+  "query": { "gnmkdm": "N253512" },
+  "headers": {
+    "x-requested-with": "XMLHttpRequest",
+    "referer": "https://jwxt.njfu.edu.cn/jsxsd/xsxk/xklc_list",
+    "origin": "https://jwxt.njfu.edu.cn"
+  },
+  "defaults": {
+    "kklxdm": "10",
+    "rwlx": "2",
+    "xkly": "0"
+  },
+  "matchFields": {
+    "name": "kcmc",
+    "code": "kch_id",
+    "teacher": "jsxx",
+    "jxbId": "jxb_id",
+    "xkkzId": "xkkz_id",
+    "capacity": "jxbrl",
+    "enrolled": "yxzrs"
+  },
+  "sessionExpired": {
+    "bodyMatches": "name=[\"']?username|统一身份认证|用户登录|请输入密码",
+    "urlMatches": "authserver|LoginToXk|/cas/login"
+  },
+  "steps": [
+    {
+      "id": "list",
+      "label": "ggxxk/可选课程列表",
+      "method": "POST",
+      "path": "/jsxsd/xsxk/zzxkyzb_cxZzxkYzbPartDisplay.html",
+      "body": {
+        "$merge": [
+          "templates",
+          {
+            "kklxdm": "${defaults.kklxdm}",
+            "rwlx": "${defaults.rwlx}",
+            "xkly": "${defaults.xkly}",
+            "kspage": 1,
+            "jspage": 200
+          }
+        ]
+      },
+      "extract": { "items": "$.tmpList[*]" }
+    },
+    {
+      "id": "detail",
+      "label": "ggxxk/展开教学班详情（换取加密凭证）",
+      "method": "POST",
+      "path": "/jsxsd/xsxk/zzxkyzbjk_cxJxbWithKchZzxkYzb.html",
+      "body": {
+        "$merge": [
+          "templates",
+          {
+            "kch_id": "${item.kch_id}",
+            "xkkz_id": "${item.xkkz_id}",
+            "kklxdm": "${defaults.kklxdm}"
+          }
+        ]
+      },
+      "extract": { "doJxbId": "$.do_jxb_id" }
+    },
+    {
+      "id": "probe",
+      "label": "ggxxk/前置探针",
+      "method": "POST",
+      "path": "/jsxsd/xsxk/zzxkyzb_cxXkTitleMsg.html",
+      "body": {
+        "$merge": ["templates", { "kch_id": "${item.kch_id}" }]
+      },
+      "gate": { "path": "$.flag", "eq": "1" }
+    },
+    {
+      "id": "submit",
+      "label": "ggxxk/提交选课",
+      "method": "POST",
+      "retry": "none",
+      "path": "/jsxsd/xsxk/zzxkyzbjk_xkBcZyZzxkYzb.html",
+      "body": {
+        "$merge": [
+          "templates",
+          {
+            "jxb_ids": "${detail.doJxbId}",
+            "kch_id": "${item.kch_id}",
+            "kcmc": "${item.kcmc}",
+            "xkkz_id": "${item.xkkz_id}",
+            "rwlx": "${defaults.rwlx}",
+            "sxbj": "1"
+          }
+        ]
+      },
+      "success": { "path": "$.flag", "eq": "1" },
+      "conflictWhen": { "path": "$.msg", "matches": "冲突|时间" },
+      "messageFrom": "$.msg"
+    },
+    {
+      "id": "verify",
+      "label": "ggxxk/已选课程列表",
+      "method": "POST",
+      "path": "/jsxsd/xsxk/zzxkyzb_cxZzxkYzbChoosedDisplay.html",
+      "body": {
+        "$merge": ["templates", { "kklxdm": "${defaults.kklxdm}" }]
+      },
+      "extract": { "items": "$.tmpList[*]" }
+    }
+  ]
+}

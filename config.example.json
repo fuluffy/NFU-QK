@@ -1,0 +1,89 @@
+{
+  "profile": "pe",
+  "school": "NJFU",
+  "term": {
+    "xnm": "2026",
+    "xqm": "3"
+  },
+  "auth": {
+    "entry": "ehall",
+    "username": "${NJFU_USER}",
+    "password": "${NJFU_PASS}",
+    "mode": "autofill",
+    "pauseOnCaptcha": true,
+    "sessionFile": "state/session.json"
+  },
+  "targets": [
+    {
+      "id": "P0",
+      "alias": [
+        "ymq"
+      ],
+      "courseName": {
+        "include": [
+          "羽毛球"
+        ]
+      },
+      "priority": 0
+    },
+    {
+      "id": "P1",
+      "courseName": {
+        "include": [
+          "乒乓球"
+        ]
+      },
+      "teacher": {
+        "include": [
+          "李"
+        ]
+      },
+      "priority": 1
+    },
+    {
+      "id": "P2",
+      "courseCode": {
+        "exact": [
+          "1234567"
+        ]
+      },
+      "priority": 2
+    }
+  ],
+  "strategy": {
+    "stopAfterSuccess": true,
+    "maxAttemptsPerTarget": 0
+  },
+  "schedule": {
+    "startAt": null,
+    "prewarmSec": 120,
+    "highFreqBeforeSec": 30,
+    "highFreqIntervalMs": 400,
+    "intervalMs": 2500,
+    "maxRunMinutes": 120
+  },
+  "net": {
+    "proxy": null,
+    "concurrency": 1,
+    "connectTimeoutMs": 5000,
+    "readTimeoutMs": 20000,
+    "maxRetries": 6,
+    "maxRedirects": 20,
+    "backoff": {
+      "baseMs": 1500,
+      "factor": 1.6,
+      "maxMs": 15000,
+      "jitter": 0.3
+    },
+    "ipv4First": true,
+    "rejectUnauthorized": true,
+    "_rejectUnauthorized_note": "2026-09-17 实测证书 *.njfu.edu.cn 有效（2026-01-29 → 2027-01-29），保持严格校验即可。若某天出现 CERT_HAS_EXPIRED（学校忘续期），可临时改为 false 让程序继续工作；届时建议同时填 pinnedCertFingerprint 以保留防中间人能力。",
+    "pinnedCertFingerprint": null
+  },
+  "safety": {
+    "dryRun": true,
+    "maxSubmitsPerMinute": 6
+  },
+  "notify": {},
+  "_notImplemented": "以下配置项曾经出现在模板里但从未实现，已移除，别再加回来：strategy.nameMatchMode / strategy.requireAllDimensions / schedule.clockSyncSec / net.degradeToDom / net.webvpn / safety.autoDropConflicting / safety.neverDropTypes / notify.webhook / notify.beep / notify.logDir。`node src/cli.js doctor` 会对这类键报警。"
+}

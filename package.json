@@ -1,0 +1,22 @@
+{
+  "name": "nfu-qk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "南京林业大学自动选课代理 — 配置驱动的选课流水线引擎（公选课 / 体育专项课）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "doctor": "node src/cli.js doctor",
+    "mock": "node tools/mock-server.js",
+    "run": "node src/cli.js run",
+    "catalog": "node src/cli.js catalog"
+  },
+  "dependencies": {},
+  "optionalDependencies": {},
+  "comments": {
+    "dependencies": "核心引擎零运行时依赖，只用 Node 内置模块（node:http/https/net/test）。Playwright 仅在 Phase 1『真机取证 / 浏览器登录』时需要，届时按需 npm i -D playwright，核心不受影响。"
+  }
+}

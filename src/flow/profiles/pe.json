@@ -1,0 +1,132 @@
+{
+  "name": "pe",
+  "label": "体育专项课（白马校区）",
+  "school": "NJFU",
+  "_status": "VERIFIED",
+  "_verifiedAt": "2026-09-17",
+  "_notes": [
+    "全部端点与字段名均来自 2026-09-17 真机取证（见 docs/侦察发现.md 与 docs/选课接口实测.md）。",
+    "选课轮次：2026-2027-1学期体育选课，开放时间 2026-09-17 12:30 ~ 2026-09-19 17:00。",
+    "本轮 qycqxk=0 —— 未启用抽签，是**先到先得**，直接抢名额。",
+    "本轮 sfyzmxk=0 —— 选课验证码未启用。",
+    "体育课在系统里是「必修」性质，走 /jsxsd/xsxkkc/ 必修选课模块，不是公选课模块。",
+    "kcmc 一律是笼统的「体育(3)」，真正的项目名在 fzmc（分组名，如「网球1」「羽毛球」）。"
+  ],
+
+  "baseUrl": "https://jwxt.njfu.edu.cn",
+  "entryPath": "/jsxsd/xsxk/xklc_list?Ves632DSdyV=NEW_XSD_PYGL",
+
+  "round": {
+    "jx0502zbid": "30DB56D4D7B6452D8C8ABFAC7CDE3CAE",
+    "name": "2026-2027-1学期体育选课",
+    "opensAt": "2026-09-17T12:30:00+08:00",
+    "closesAt": "2026-09-19T17:00:00+08:00"
+  },
+
+  "headers": {
+    "x-requested-with": "XMLHttpRequest",
+    "referer": "https://jwxt.njfu.edu.cn/jsxsd/xsxkkc/comeInBxxk",
+    "origin": "https://jwxt.njfu.edu.cn",
+    "accept": "application/json, text/javascript, */*; q=0.01"
+  },
+
+  "matchFields": {
+    "name": "fzmc",
+    "code": "kch",
+    "teacher": "skls",
+    "jxbId": "jx0404id",
+    "capacity": "pkrs",
+    "enrolled": "xkrs",
+    "_extra": {
+      "syrs": "剩余容量（字符串，显示用）",
+      "jx02id": "提交时必须作为 kcid 查询参数（注意：不是页面上那个空的 kcid 隐藏域）",
+      "cfbs": "提交时必须作为 cfbs 查询参数",
+      "ctsm": "服务端算好的时间冲突说明，空串表示无冲突",
+      "xkzt": "选课状态，'9' 表示已选中"
+    }
+  },
+
+  "sessionExpired": {
+    "bodyMatches": "name=[\"']?username|统一身份认证|用户登录|请输入密码",
+    "urlMatches": "authserver/login"
+  },
+
+  "steps": [
+    {
+      "id": "list",
+      "label": "pe/可选课程列表",
+      "method": "POST",
+      "path": "/jsxsd/xsxkkc/xsxkBxxk",
+      "query": { "kcid": "" },
+      "body": {
+        "sEcho": 1,
+        "iColumns": 14,
+        "sColumns": ",,,,,,,,,,,,,",
+        "iDisplayStart": 0,
+        "iDisplayLength": 200,
+        "sSearch": "",
+        "bRegex": "false",
+        "iSortCol_0": 0,
+        "sSortDir_0": "asc",
+        "iSortingCols": 0,
+        "mDataProp_0": "kch",
+        "mDataProp_1": "kcmc",
+        "mDataProp_2": "dwmc",
+        "mDataProp_3": "skfsmc",
+        "mDataProp_4": "fzmc",
+        "mDataProp_5": "ktmc",
+        "mDataProp_6": "xf",
+        "mDataProp_7": "skls",
+        "mDataProp_8": "sksj",
+        "mDataProp_9": "skdd",
+        "mDataProp_10": "xqmc",
+        "mDataProp_11": "syrs",
+        "mDataProp_12": "ctsm",
+        "mDataProp_13": "czOper"
+      },
+      "extract": { "items": "$.aaData[*]" },
+      "filter": {
+        "all": [
+          { "path": "$.ctsm", "eq": "" },
+          { "path": "$.xkzt", "ne": "9" }
+        ]
+      }
+    },
+    {
+      "id": "submit",
+      "label": "pe/提交选课",
+      "method": "POST",
+      "retry": "none",
+      "path": "/jsxsd/xsxkkc/bxxkOper",
+      "query": {
+        "kcid": "${item.jx02id}",
+        "cfbs": "${item.cfbs}"
+      },
+      "body": {
+        "jx0404id": "${item.jx0404id}",
+        "xkzy": "",
+        "trjf": ""
+      },
+      "success": { "path": "$.success", "eq": true },
+      "conflictWhen": { "path": "$.message", "matches": "冲突" },
+      "messageFrom": "$.message"
+    },
+    {
+      "id": "verify",
+      "label": "pe/已选课程列表（确认结果用）",
+      "_note": "服务端渲染的 HTML，不是 JSON —— 引擎会直接查 jx0404id 是否出现。",
+      "method": "GET",
+      "path": "/jsxsd/xsxkjg/comeXkjglb",
+      "headers": {
+        "referer": "https://jwxt.njfu.edu.cn/jsxsd/xsxkjg/comeXkjglb",
+        "accept": "text/html,application/xhtml+xml"
+      }
+    }
+  ],
+
+  "_nextYear": [
+    "轮次 ID（jx0502zbid）每年都变，不要手改这里 —— 用 `node src/cli.js rounds` 自动发现并写回 config.json。",
+    "体育选课通常在 9 月下旬开放（2022 年 9/27 12:30，2026 年 9/17 12:30）。",
+    "若提交接口从 bxxkOper 变成别的（例如启用抽签后会走 xsxkFun / 志愿模式），重跑取证流程即可。"
+  ]
+}
