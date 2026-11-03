@@ -38,7 +38,7 @@ const MAX_LOGS = 1200;
  *
  * `rejectUnauthorized:false` 是刻意写在这里的：学校证书 2025-03 就过期了，
  * 严格校验下连登录页都打不开。宁可默认能用，也不要让新用户先撞一堵墙
- * 再去翻文档 —— 风险说明见 README 与 docs/实战应急手册.md。
+ * 再去翻文档 —— 风险说明见 README。
  */
 const DEFAULT_NET = {
   concurrency: 1,

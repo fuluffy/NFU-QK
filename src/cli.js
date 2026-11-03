@@ -720,7 +720,7 @@ async function cmdLogin(args) {
     // 探测通过后**必须再存一次**。
     // 上面那次保存发生在探测之前，而首次访问 jwxt 时服务端会重建 SESSION（同名 Cookie 换新值），
     // 新值只在内存罐子里。不补这次保存，文件里就是探测前那份 —— 下次拿它发请求必被跳登录页，
-    // 表现为「刚登录成功，一用就掉线」（2026-11-03 实测复现，查证过程见 docs/维护笔记.md）。
+    // 表现为「刚登录成功，一用就掉线」（2026-11-03 实测复现）。
     await writeFile(sessionFile, JSON.stringify(jar.toJSON(), null, 2), 'utf8');
     logger.debug(`会话已在探测后刷新保存：${sessionFile}`);
 
