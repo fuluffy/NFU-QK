@@ -392,12 +392,31 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
     return json(res, { error: '未知接口' }, 404);
   }
 
+  /**
+   * 静态文件只开放界面自己的目录。
+   *
+   * 以前是"解析后只要还在项目里就发"—— 那等于把 `state/session.json`（会话 Cookie，
+   * 等同于账号登录态）和 `config.ggxxk.json`（个人志愿）一起端给了任何能访问
+   * 127.0.0.1:5178 的东西。用白名单，而不是黑名单：以后新增敏感文件不会自动泄露。
+   */
+  const STATIC_ALLOW = ['src/ui/'];
+
+  function resolveStatic(pathname) {
+    const rel = pathname === '/' ? 'src/ui/app.html' : pathname.replace(/^\/+/, '');
+    const norm = path.posix.normalize(rel);
+    if (!norm || norm.startsWith('..') || path.isAbsolute(norm)) return null;
+    if (!STATIC_ALLOW.some((p) => norm.startsWith(p))) return null;
+    const file = path.resolve(root, norm);
+    const back = path.relative(root, file);
+    if (!back || back.startsWith('..') || path.isAbsolute(back)) return null;
+    return file;
+  }
+
   async function handleStatic(req, res, url) {
-    let rel = url.pathname === '/' ? 'src/ui/app.html' : url.pathname.replace(/^\/+/, '');
-    const file = path.resolve(root, rel);
-    // 目录穿越保护：解析后必须仍在项目内
-    if (!file.startsWith(root)) {
-      res.writeHead(403).end('forbidden');
+    const file = resolveStatic(url.pathname);
+    if (!file) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('not found');
       return;
     }
     try {
@@ -413,7 +432,31 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
     }
   }
 
+  /**
+   * 防 DNS rebinding / 跨站驱动：只认本机 Host，且带 Origin 时必须同源。
+   *
+   * 这个服务会拿真账号去提交选课，不能让"用户随手打开的任意网页"通过
+   * `fetch('http://127.0.0.1:5178/api/run')` 替他把课选了。
+   */
+  function sameOriginOk(req) {
+    const host = String(req.headers.host ?? '');
+    const hostname = host.replace(/:\d+$/, '').toLowerCase();
+    if (hostname && hostname !== '127.0.0.1' && hostname !== 'localhost' && hostname !== '[::1]') return false;
+    const origin = req.headers.origin;
+    if (!origin) return true; // 同源 GET / curl 不带 Origin
+    try {
+      const o = new URL(origin);
+      return o.host === host || ['127.0.0.1', 'localhost', '[::1]'].includes(o.hostname);
+    } catch {
+      return false;
+    }
+  }
+
   const server = http.createServer((req, res) => {
+    if (!sameOriginOk(req)) {
+      json(res, { error: '只接受本机同源请求' }, 403);
+      return;
+    }
     const url = new URL(req.url, `http://${req.headers.host ?? '127.0.0.1'}`);
     const run = url.pathname.startsWith('/api/') ? handleApi : handleStatic;
     Promise.resolve(run(req, res, url)).catch((err) => {

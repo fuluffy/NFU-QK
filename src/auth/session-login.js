@@ -178,7 +178,11 @@ export class SessionLogin {
 
   async save(sessionFile) {
     await mkdir(path.dirname(sessionFile), { recursive: true });
-    await writeFile(sessionFile, JSON.stringify(this.jar.toJSON(), null, 2), 'utf8');
+    // 这个文件等同登录凭证，只给自己读写（POSIX 下生效；Windows 忽略 mode）。
+    await writeFile(sessionFile, JSON.stringify(this.jar.toJSON(), null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
     this.logger?.info(`会话已保存：${sessionFile}`);
     return sessionFile;
   }

@@ -368,8 +368,11 @@ export class Runner {
       if (got >= bucket.needCredits) continue;
       const targets = this.bucketActiveTargets(bucket);
       if (!targets.length) {
-        this.logger?.warn(
+        // 每轮都会走到这里，不节流就是每 2.5 秒刷一条，把真正的进展淹掉
+        this.logThrottled(
+          `bucket-exhausted:${bucket.id}`,
           `类别「${bucket.label ?? bucket.id}」的候选已全部用尽，仍未修满 ${bucket.needCredits} 学分`,
+          'warn',
         );
         continue;
       }
@@ -485,20 +488,19 @@ export class Runner {
   }
 
   async handleSessionExpired(err) {
-    this.counters.sessionRelogins += 1;
-    this.logger?.warn(`会话失效（${err.message}），第 ${this.counters.sessionRelogins} 次尝试恢复…`);
-
     if (this.onSessionExpired) {
       try {
         const st = await this.onSessionExpired(err);
-        // 'waiting' = 还没等到新登录。回调已经把话说清楚了，这里不能再报"已恢复"，
-        // 否则日志上看着像在正常抢课，实际每轮都在被弹回登录页。
+        // 'waiting' = 还没等到新登录（人还在界面里输密码）。
+        // 这**不能**计入"恢复失败"：以前是进来就 +1，用户去泡杯茶回来，
+        // 进程已经因为"连续 5 次无法恢复"自己退出了 —— 蹲守等于白蹲。
         if (st === 'waiting') return true;
         if (st) {
           // 换了会话就等于换了服务端 session，之前 warmup 建立的"当前轮次"上下文全没了。
           // 不重置的话，接下来的列表请求会返回空壳，又被读成"没有课"。
+          this.counters.sessionRelogins += 1;
           if (this.engine) this.engine.warmupDone = false;
-          this.logger?.info('会话已恢复，继续抢课');
+          this.logger?.info(`会话已恢复（第 ${this.counters.sessionRelogins} 次），继续抢课`);
           await this.sleep(1000);
           return true;
         }
@@ -506,6 +508,9 @@ export class Runner {
         this.logger?.warn(`重登失败：${e.message ?? e}`);
       }
     }
+
+    this.counters.sessionRelogins += 1;
+    this.logger?.warn(`会话失效（${err.message}），第 ${this.counters.sessionRelogins} 次尝试恢复…`);
 
     if (this.counters.sessionRelogins >= 5) {
       this.logger?.error('连续 5 次无法恢复会话，停止运行（需人工介入）');
@@ -523,7 +528,7 @@ export class Runner {
    *
    * 兼容旧写法：只传一个参数时，用它自己当 key。
    */
-  logThrottled(key, msg) {
+  logThrottled(key, msg, level = 'info') {
     if (msg === undefined) {
       msg = key;
       key = msg;
@@ -532,7 +537,7 @@ export class Runner {
     if (now - (this.throttleAt.get(key) ?? -Infinity) < this.logThrottleMs) return false;
     this.throttleAt.set(key, now);
     this.counters.logThrottle += 1;
-    this.logger?.info(msg);
+    (this.logger?.[level] ?? this.logger?.info)?.call(this.logger, msg);
     return true;
   }
 }

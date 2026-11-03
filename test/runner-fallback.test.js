@@ -93,3 +93,60 @@ test('一旦不再满员，满员计时被清掉', async () => {
   await runner.cycle(ctx);
   assert.equal(runner.fullSince.has('P0'), false);
 });
+
+/**
+ * 等待人工重新登录，不能算"恢复失败"。
+ *
+ * 事故：会话失效后进程会请用户去界面重登，并每 20 秒问一次"文件更新了吗"。
+ * 以前每次询问都让 sessionRelogins +1，于是用户去倒杯水回来，
+ * 进程已经因为「连续 5 次无法恢复会话」自己退出了 —— 蹲守等于白蹲。
+ */
+test('等人重新登录期间不计失败次数，蹲守不会自己退出', async () => {
+  const runner = new Runner({
+    engine: {},
+    store: new TargetStore({ targets: [], now: () => 0 }),
+    clock: { serverNow: () => 0 },
+    sleep: async () => {},
+    logger: null,
+    now: () => 0,
+    onSessionExpired: async () => 'waiting',
+  });
+
+  for (let i = 0; i < 12; i += 1) {
+    const keep = await runner.handleSessionExpired(new Error('被重定向到登录地址'));
+    assert.equal(keep, true, `第 ${i + 1} 次等待也必须继续跑，不能退出`);
+  }
+  assert.equal(runner.counters.sessionRelogins, 0, '等待人工登录不该计入恢复失败次数');
+});
+
+test('真正恢复成功才计一次，并且重置 warmup 上下文', async () => {
+  const engine = { warmupDone: true };
+  const runner = new Runner({
+    engine,
+    store: new TargetStore({ targets: [], now: () => 0 }),
+    clock: { serverNow: () => 0 },
+    sleep: async () => {},
+    logger: null,
+    now: () => 0,
+    onSessionExpired: async () => 'fresh',
+  });
+
+  assert.equal(await runner.handleSessionExpired(new Error('x')), true);
+  assert.equal(runner.counters.sessionRelogins, 1);
+  assert.equal(engine.warmupDone, false, '换会话后必须重新建立选课上下文');
+});
+
+test('没有恢复通道时才按失败计次，5 次后停', async () => {
+  const runner = new Runner({
+    engine: {},
+    store: new TargetStore({ targets: [], now: () => 0 }),
+    clock: { serverNow: () => 0 },
+    sleep: async () => {},
+    logger: null,
+    now: () => 0,
+  });
+
+  const results = [];
+  for (let i = 0; i < 5; i += 1) results.push(await runner.handleSessionExpired(new Error('x')));
+  assert.deepEqual(results, [true, true, true, true, false], '第 5 次应停止');
+});

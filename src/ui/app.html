@@ -602,6 +602,7 @@ button{font:inherit}
             </div>
           </div>
           <div id="resultBox"></div>
+          <div class="hint" id="runBlock" style="color:var(--danger);margin-top:10px;display:none"></div>
         </div>
 
         <div class="hint">
@@ -773,9 +774,12 @@ function renderSteps(){
 
   const pill = $('#pill'), txt = $('#pillText');
   pill.className = 'pill';
-  if (S.running) { pill.classList.add('busy'); txt.textContent = '正在运行'; }
+  // 掉线优先于"正在运行"：运行中会话失效时，右上角必须说实话
+  if (S.session?.usable === false && S.session?.exists) {
+    pill.classList.add('warn');
+    txt.textContent = '登录已过期';
+  } else if (S.running) { pill.classList.add('busy'); txt.textContent = '正在运行'; }
   else if (S.session?.usable) { pill.classList.add('ok'); txt.textContent = '已登录'; }
-  else if (S.session?.exists) { pill.classList.add('warn'); txt.textContent = '登录已过期'; }
   else { txt.textContent = '未登录'; }
 }
 
@@ -1315,6 +1319,16 @@ function renderSummary(){
   const ready = BUCKETS.every(b => stateNeed(b.id) === 0 || S.chains[b.id].length > 0);
   $('#btnDry').disabled = !ready;
   $('#btnLive').disabled = !ready;
+
+  // 按钮被禁用时必须说清"为什么"。否则用户只看到两个灰按钮，不知道回去补哪一类。
+  const missing = BUCKETS.filter(b => stateNeed(b.id) > 0 && S.chains[b.id].length === 0);
+  const block = $('#runBlock');
+  if (block) {
+    block.style.display = missing.length ? 'block' : 'none';
+    block.textContent = missing.length
+      ? `还不能开始：${missing.map(b => `「${b.label}」`).join('、')} 没有候选课程 —— 回第 2 步至少给每类选一门。`
+      : '';
+  }
 }
 
 $('#btnNow').onclick = () => {
@@ -1437,6 +1451,12 @@ function connectEvents(){
 
     if (d.type === 'log') {
       pushLog(d.line, d.level);
+      // 运行中掉线：日志里已经在喊"请重新登录"，但右上角还挂着绿色的「已登录」，
+      // 用户就会以为一切正常。这里同步把徽标改成过期，并把人引回第 1 步。
+      if (/会话失效|重新登录|会话仍是旧的/.test(d.line ?? '')) {
+        S.session = { ...(S.session ?? {}), exists: true, usable: false };
+        renderSteps();
+      }
       return;
     }
     if (d.type === 'phase') {
