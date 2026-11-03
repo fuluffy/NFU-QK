@@ -716,6 +716,14 @@ async function cmdLogin(args) {
       logger.error('2026-11 起必须是 http://jwxt.njfu.edu.cn/ （根路径，不是 /jsxsd/）。');
       return 1;
     }
+
+    // 探测通过后**必须再存一次**。
+    // 上面那次保存发生在探测之前，而首次访问 jwxt 时服务端会重建 SESSION（同名 Cookie 换新值），
+    // 新值只在内存罐子里。不补这次保存，文件里就是探测前那份 —— 下次拿它发请求必被跳登录页，
+    // 表现为「刚登录成功，一用就掉线」（2026-11-03 实测复现，查证过程见 docs/维护笔记.md）。
+    await writeFile(sessionFile, JSON.stringify(jar.toJSON(), null, 2), 'utf8');
+    logger.debug(`会话已在探测后刷新保存：${sessionFile}`);
+
     logger.info('下一步：运行 node src/cli.js rounds 发现选课轮次。');
     return 0;
   } catch (err) {

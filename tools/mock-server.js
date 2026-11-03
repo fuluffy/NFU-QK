@@ -285,6 +285,12 @@ export async function startMockSchool(opts = {}) {
       if (!course) return sendJson(res, { flag: '0', msg: '教学班不存在' });
       if (course.yxzrs >= course.jxbrl) return sendJson(res, { flag: '0', msg: '该教学班名额已满' });
 
+      // 真机见过的一种拒绝形状：success=false 但 message 是 null（不是空串、不是文案）。
+      // 客户端凡把 message 当字符串处理的地方都会在这里炸，所以必须有一个用例守着。
+      if (plan === 'null-message') {
+        return sendJson(res, { flag: '0', msg: null });
+      }
+
       // 入库
       course.yxzrs += 1;
       sess.enrolled.push({ ...course });

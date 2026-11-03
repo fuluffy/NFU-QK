@@ -2,7 +2,7 @@
   "name": "ggxxk-xsxkkc",
   "label": "公选课（通识选修）— xsxkkc 族",
   "school": "NJFU",
-  "_status": "PARTIAL —— 2026-11-03 17:00 实测：列表 174 门、7 门目标全部命中、字段映射（kch/kcmc/pkrs/xkrs/szkcflmc）确认；提交（ggxxkxkOper）仍未经真机验证 —— 当天目标全部满员或本学期未排课，没有可提交的机会",
+  "_status": "VERIFIED-SUBMIT —— 2026-11-03 19:58 真机提交成功：POST /jsxsd/xsxkkc/ggxxkxkOper 返回 {\"success\":true,\"message\":\"选课成功\",\"jfViewStr\":\"\"}（4014004 家居与人类文明，提交前余 108/120）。列表 176 门、87 门有余量。⚠️ 失败分支只有一半取证：伪造 jx0404id 返回 {\"success\":false,\"message\":null}，message 可能为 null；真实冲突/重复选课时的文案仍未见过。",
   "_notes": [
     "2026-11-03 13:10 实测结论（重要，别再踩）：",
     "  ① 必须先进上下文：GET xklc_list（取 toxk('轮次ID')）→ GET xsxk_index?jx0502zbid=ID → GET comeInGgxxkxk。",
@@ -20,7 +20,26 @@
     "字段与请求体依据：github.com/jvav-runtime-environment/NJFU-class-graber（样本学期 2024-2025-2）",
     "详细对照见 docs/学长项目借鉴-2024.md。",
     "⚠️ 仍未验证：matchFields 的字段名（kcmc/kch/skls/jx0404id/pkrs/xkrs）在 2026 秋响应里是否一致",
-    "——因为至今没拿到过一条真实课程记录。放课后第一件事就是核对这一项。"
+    "——因为至今没拿到过一条真实课程记录。放课后第一件事就是核对这一项。",
+    "",
+    "2026-11-03 19:56~20:00 真机提交（空账号，一门未选）—— 结论：",
+    "  ⑥ 提交成功形状：HTTP 200，content-type text/html 但 body 是 JSON：",
+    "     {\"success\":true,\"message\":\"选课成功\",\"jfViewStr\":\"\"}。success 判定与 message 提取都对得上，无需改 profile。",
+    "  ⑦ 参数落位确认（原 _openQuestions 第 2 条）：query 带 kcid=<jx02id>，body 带 jx0404id + kcid + 空的 cfbs/xkzy/trjf，",
+    "     一次提交即成功 —— 说明「两处都发」的兼容写法有效，不必再猜。",
+    "  ⑧ 失败形状：拿不存在的 jx0404id 提交，返回 {\"success\":false,\"message\":null}。",
+    "     **message 是 null 不是字符串**：凡是把 message 当字符串处理的地方（截断、正则、拼日志）都要容忍 null，",
+    "     否则会抛 TypeError 把一个「正常的拒绝」变成「程序崩溃」。",
+    "  ⑨ 类别字段的实际结构（限定条件依赖它，别再按课程库的写法猜）：",
+    "     szkcflmc / tsTskflMc = 大类（如「人文素养类」）；tsTskflMc2 = 单元（如「艺术审美」「创新创业」）；",
+    "     tsTskflMc3 = 艺术审美的三个子类（美学和艺术史论类 / 艺术鉴赏和评论类 / 艺术体验和实践类）。",
+    "     课程库里的 unit 是「艺术审美（美学和艺术史论类）」这种合并写法，与接口不同 —— 所以限定组必须按 target id 收窄，",
+    "     不能靠接口字段现算。",
+    "  ⑩ 提交后**立即**再拉列表会被 302 到 /authserver/logout（引擎已拒绝跟随，保全 SSO）。",
+    "     当天无法排除是「提交动作本身」还是「请求间隔太短」造成，下一次开抢时盯这一条：",
+    "     若抢到第一门后立刻掉线，就说明提交后需要重新登录才能继续抢第二门。",
+    "  ⑪ 同日实测：艺术审美·美学和艺术史论类 6 门、艺术鉴赏和评论类 6 门**全部满员**（0/100、0/120），",
+    "     绿色文明类与创新创业类则有大量余量。即「限定那 1 学分」当天只能蹲退课。"
   ],
   "baseUrl": "https://jwxt.njfu.edu.cn",
   "entryPath": "/jsxsd/xsxk/xklc_list",
@@ -190,8 +209,8 @@
     }
   ],
   "_openQuestions": [
-    "是否需要进入选课上下文（xsxk_index?jx0502zbid=…）—— 引擎当前不支持 warmup 步骤，若要补需单独实现",
-    "提交参数 kcid/cfbs 的落位（query / body）—— profile 两处都发以图兼容",
+    "提交后立刻拉列表被 302 到 logout —— 未定位：是提交动作的副作用，还是请求过密（下次开抢盯住）",
+    "重复提交同一门课（已在课表中）时的返回文案未见过 —— 需要一门已选课再发一次才能取证",
     "选修类别码 kklxdm 是否还存在 —— 公选课请求体里没有该参数，故本条不适用"
   ]
 }

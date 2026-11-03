@@ -210,6 +210,23 @@ test('提交后连接被切断（结果未知）：靠已选列表确认成功�
   }
 });
 
+test('服务端拒绝但 message 是 null：不能崩，要落成可读文案', async () => {
+  // 真机形状：{"success":false,"message":null}。message 为 null 时任何
+  // `message.slice()` / `message.replace()` 都会抛 TypeError —— 那会把一次
+  // 正常的"被拒绝"变成"程序崩了"，运维看到的是完全错误的信号。
+  const h = await setup({ submitPlan: ['null-message'] }, { maxRunMinutes: 0.02 });
+  try {
+    await h.runner.run(h.ctx);
+
+    assert.ok(h.results.length > 0, '应至少尝试过一次');
+    assert.equal(h.results[0].status, 'rejected');
+    assert.equal(typeof h.results[0].message, 'string', 'message 必须始终是字符串');
+    assert.ok(h.results[0].message.length > 0, '不能是空串，否则日志里看不出发生了什么');
+  } finally {
+    await h.close();
+  }
+});
+
 test('前置探针未放行时不做提交', async () => {
   const h = await setup({ probeBlocked: true }, { maxRunMinutes: 0.03 });
   try {

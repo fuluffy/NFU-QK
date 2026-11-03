@@ -71,6 +71,10 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
   if (profile._status && !String(profile._status).startsWith('VERIFIED')) {
     logger.warn(`⚠️ 接口状态：${profile._status}`);
     logger.warn('   它有依据，但没对当前学期验证过。实跑时盯住「列表条数」——若为 0，大概率是接口已变。');
+  } else if (String(profile._status ?? '').includes('⚠️')) {
+    // 已验证，但还有分支没取过证（例如"提交失败时服务端说什么"）。
+    // 这种情况不该再吓唬人，也不该瞒着 —— 压成一行，说清边界在哪。
+    logger.warn(`接口状态：${profile._status}`);
   }
 
   // 配置体检必须在发第一个请求之前做完。
