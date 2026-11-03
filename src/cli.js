@@ -23,6 +23,8 @@ import { Clock } from './net/clock.js';
 import { FlowEngine } from './flow/engine.js';
 import { Runner } from './flow/runner.js';
 import { loadProfile, checkProfile, listProfileNames } from './flow/profile.js';
+import { validateConfig } from './flow/config-rules.js';
+import { loadCatalog, saveCatalog, importBuffer, guessTerm, TERM_LABEL } from './catalog/import.js';
 import { TargetStore, describeTarget } from './state/store.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -76,7 +78,7 @@ function resolveEnv(value) {
 // 历史原因，配置模板里出现过几个"只有设计、没有实现"的开关。它们不报错、不生效，
 // 只会让人误以为开了某个保险 —— 这是最坏的一类配置，必须在 doctor 里当面说清。
 const KNOWN_KEYS = {
-  '': ['profile', 'school', 'term', 'auth', 'targets', 'buckets', 'strategy', 'schedule', 'net', 'safety', 'notify'],
+  '': ['profile', 'school', 'term', 'auth', 'targets', 'buckets', 'strategy', 'schedule', 'net', 'safety', 'notify', 'ui'],
   term: ['xnm', 'xqm'],
   auth: ['entry', 'username', 'password', 'mode', 'pauseOnCaptcha', 'sessionFile'],
   strategy: ['stopAfterSuccess', 'maxAttemptsPerTarget', 'fullFallbackAfterSec'],
@@ -87,6 +89,8 @@ const KNOWN_KEYS = {
   ],
   'net.backoff': ['baseMs', 'factor', 'maxMs', 'jitter'],
   safety: ['dryRun', 'maxSubmitsPerMinute'],
+  // 界面偏好。不影响抢课逻辑，放进配置是为了"换台电脑还是同一个界面"。
+  ui: ['maxBuckets', 'term', 'onlyOpenThisTerm'],
 };
 
 const TARGET_KEYS = ['id', 'alias', 'priority', 'courseName', 'courseCode', 'teacher', 'jxbId', 'credits'];
@@ -160,52 +164,13 @@ function auditStrategy(config) {
 /**
  * 分桶配置的体检。分桶最容易出错的地方是"桶里引用了不存在的目标 id"——
  * 那种错误不会报错，只会让某个类别永远抢不到，而且日志里看不出来。
+ *
+ * 规则本体在 `src/flow/config-rules.js`：运行前、界面保存时、doctor 三处共用同一份，
+ * 各写一遍一定会漂移（历史教训）。
  */
 function auditBuckets(config) {
-  const issues = [];
-  const buckets = config.buckets;
-  if (buckets === undefined) return issues;
-  if (!Array.isArray(buckets)) return ['buckets —— 必须是数组'];
-
-  const targetIds = new Set((config.targets ?? []).map((t) => t.id));
-  const seenBucket = new Set();
-  const usedTargets = new Map();
-
-  for (const [i, b] of buckets.entries()) {
-    if (!b || typeof b !== 'object') {
-      issues.push(`buckets[${i}] —— 不是对象`);
-      continue;
-    }
-    if (!b.id) issues.push(`buckets[${i}] —— 缺少 id`);
-    else if (seenBucket.has(b.id)) issues.push(`buckets[${i}] —— id 重复：${b.id}`);
-    else seenBucket.add(b.id);
-
-    if (!(Number(b.needCredits) > 0)) {
-      issues.push(`buckets[${i}]（${b.id ?? '未命名'}）—— needCredits 必须是正数`);
-    }
-    if (!Array.isArray(b.targets) || !b.targets.length) {
-      issues.push(`buckets[${i}]（${b.id ?? '未命名'}）—— targets 必须是非空数组`);
-      continue;
-    }
-    for (const id of b.targets) {
-      if (!targetIds.has(id)) {
-        issues.push(`buckets[${i}] 引用了不存在的目标：${id}`);
-        continue;
-      }
-      if (usedTargets.has(id)) {
-        issues.push(`目标 ${id} 同时属于两个桶（${usedTargets.get(id)} 与 ${b.id}）—— 请拆开`);
-      } else {
-        usedTargets.set(id, b.id);
-      }
-    }
-  }
-
-  // 配了桶却漏了目标，说明写配置时漏了一类，属于静默失败
-  const orphans = [...targetIds].filter((id) => !usedTargets.has(id));
-  if (orphans.length) {
-    issues.push(`以下目标没有归入任何桶，分桶模式下不会被抢：${orphans.join(', ')}`);
-  }
-  return issues;
+  const { errors, warnings } = validateConfig(config);
+  return [...errors, ...warnings.map((w) => `${w}（提醒）`)];
 }
 
 async function loadConfig(file) {
@@ -390,6 +355,110 @@ async function cmdSimulate(args) {
 
   const ok = out.outcome === 'success' || out.outcome === 'dry-run';
   logger.info(ok ? `✅ 模拟结束：${out.outcome}` : `⚠️ 模拟结束：${out.outcome}（该场景本就预期不会成功抢到）`);
+  return 0;
+}
+
+// ────────────────────────────── check ──────────────────────────────
+
+/**
+ * 候选体检（只读）：拉一次实时列表，逐门告诉你"能抢 / 满员 / 本学期没排课"。
+ *
+ * 为什么不让人看日志猜：抢课失败有三种完全不同的原因，旧日志把它们说成同一句
+ * "无候选"，于是用户会一直等一门永远不会出现的课。这个命令就是用来把三者分开的。
+ */
+async function cmdCheck(args) {
+  const logger = createLogger({ level: 'info', color: true });
+  const { path: cfgPath, config } = await loadConfig(args.config);
+  const profileName = args.profile ?? config.profile ?? 'ggxxk-xsxkkc';
+  const profile = await loadProfile(profileName);
+  logger.info(`体检配置：${cfgPath}｜profile=${profileName}`);
+
+  const { precheck } = await import('./flow/precheck.js');
+  const out = await precheck({ config, profile, root: ROOT, logger });
+
+  if (!out.ok) {
+    logger.error(`体检未通过（${out.stage}）：${out.reason}`);
+    if (out.hint) logger.warn(`  ↳ ${out.hint}`);
+    return 1;
+  }
+
+  logger.info(`列表 ${out.listCount} 门｜候选 ${out.summary.targets} 门 → ` +
+    `能抢 ${out.summary.available}｜满员 ${out.summary.full}｜没排课 ${out.summary.missing}`);
+  logger.info(out.verdict);
+
+  const tag = { available: '能抢  ', full: '满员  ', missing: '没开  ' };
+  for (const t of out.targets) {
+    const line = `  ${tag[t.status] ?? t.status} ${t.code}  ${t.name}  —— ${t.hint}`;
+    if (t.status === 'available') logger.info(line);
+    else if (t.status === 'full') logger.warn(line);
+    else logger.error(line);
+  }
+  for (const b of out.buckets) {
+    logger.info(`  类别「${b.label}」需 ${b.needCredits} 学分：可抢 ${b.available}｜满员 ${b.full}｜没排课 ${b.missing}`);
+  }
+  return out.summary.available > 0 ? 0 : 2;
+}
+
+// ────────────────────────────── catalog ──────────────────────────────
+
+/**
+ * 课程库：看一眼当前的 / 导入一份新的。
+ *
+ * 界面里能导入，命令行也要能 —— 否则"无头环境（服务器上跑）"就成了二等公民，
+ * 而 package.json 里早就写了 `npm run catalog` 却一直没有对应实现。
+ */
+async function cmdCatalog(args) {
+  const logger = createLogger({ level: 'info', color: true });
+  const { courses: current, meta } = await loadCatalog(ROOT);
+
+  if (args.import) {
+    const file = path.resolve(String(args.import));
+    let buf;
+    try {
+      buf = await readFile(file);
+    } catch (err) {
+      logger.error(`读不到 ${file}：${err.message}`);
+      return 2;
+    }
+    const term = args.term ?? guessTerm();
+    let result;
+    try {
+      result = importBuffer(buf, { filename: path.basename(file), term });
+    } catch (err) {
+      logger.error(err.message);
+      return 2;
+    }
+    const saved = await saveCatalog(ROOT, result.catalog);
+    logger.info(`已导入 ${path.basename(file)} → ${saved}`);
+    logger.info(
+      `  有效课程 ${result.stats.courses} 门｜本${TERM_LABEL[term] ?? term}季开 ${result.stats.openNow} 门` +
+        `｜读入 ${result.stats.rows} 行｜跳过 ${result.stats.skipped.length} 行`,
+    );
+    for (const [k, v] of Object.entries(result.stats.categories).sort((a, b) => b[1] - a[1])) {
+      logger.info(`  · ${k || '（未分类）'} ${v} 门`);
+    }
+    for (const w of result.warnings) logger.warn(`  ! ${w}`);
+    for (const s of result.stats.skipped.slice(0, 10)) {
+      logger.warn(`  第 ${s.row} 行跳过：${s.reason}${s.name ? ` —— ${s.name}` : ''}`);
+    }
+    return 0;
+  }
+
+  if (!current.length) {
+    logger.warn('课程库是空的。用 `node src/cli.js catalog --import 课表.xlsx` 导入一份。');
+    return 1;
+  }
+  logger.info(`课程库：${current.length} 门`);
+  if (meta?.source) logger.info(`来源：${meta.source}${meta.importedAt ? `（${String(meta.importedAt).slice(0, 16).replace('T', ' ')}）` : ''}`);
+  const terms = { spring: 0, autumn: 0, summer: 0, unknown: 0 };
+  for (const c of current) {
+    if (!Array.isArray(c.terms) || !c.terms.length) terms.unknown += 1;
+    for (const t of c.terms ?? []) terms[t] = (terms[t] ?? 0) + 1;
+  }
+  logger.info(`开课：春 ${terms.spring}｜秋 ${terms.autumn}｜夏 ${terms.summer}｜不知道 ${terms.unknown}`);
+  const byCat = {};
+  for (const c of current) byCat[c.category || '（未分类）'] = (byCat[c.category || '（未分类）'] ?? 0) + 1;
+  for (const [k, v] of Object.entries(byCat).sort((a, b) => b[1] - a[1])) logger.info(`  · ${k} ${v} 门`);
   return 0;
 }
 
@@ -882,6 +951,8 @@ const USAGE = `
   login                 登录统一身份认证（金智 CAS，纯 HTTP，无需浏览器）并保存会话
   rounds                自动发现选课轮次（轮次 ID 每学期都变，不要手填）
   simulate              在本地 Mock 选课系统上跑一遍（不接触真实服务器）
+  catalog               查看 / 导入课程表（.xlsx / .csv），字段与界面导入一致
+  check                 候选体检（只读）：逐门核对"能抢 / 满员 / 本学期没排课"
   run                   对真实教务系统运行
 
 ui 选项：
@@ -910,6 +981,16 @@ simulate 选项：
   --live                实跑（会向本地 Mock 提交）；不加则为干跑
   --profile <名称>      默认 pe
   --verbose             输出 debug 日志
+
+check 选项：
+  --config <路径>       指定配置文件，默认 config.ggxxk.json
+  --profile <名称>      覆盖配置里的 profile
+  只读：不会提交选课，也不会修改会话与配置
+
+catalog 选项：
+  --import <路径>       导入课程表（.xlsx / .csv），替换 data/catalog.json
+  --term <autumn|spring|summer>  导入时按哪个学期统计"本学期开课"，默认按当前月份猜
+  不加 --import 时打印当前课程库的统计
 
 run 选项：
   --config <路径>       指定配置文件
@@ -973,6 +1054,10 @@ async function main() {
       return cmdLogin(args);
     case 'run':
       return cmdRun(args);
+    case 'catalog':
+      return cmdCatalog(args);
+    case 'check':
+      return cmdCheck(args);
     case undefined:
     case 'help':
     case '--help':

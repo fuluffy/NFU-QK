@@ -7,6 +7,7 @@ import {
   isAvailable,
   selectBest,
   explainMiss,
+  findSimilar,
 } from '../src/match/matcher.js';
 
 const FIELDS = {
@@ -132,4 +133,32 @@ test('explainMiss 给出未命中的原因，便于排查"明明有课却匹配�
   const miss = explainMiss([YUMAO], { courseName: { include: ['乒乓球'] } }, FIELDS);
   assert.equal(miss.length, 1);
   assert.match(miss[0].reasons.join(' '), /未包含/);
+});
+
+/**
+ * findSimilar：回答"列表里有没有长得像的课"。
+ *
+ * 现场最常见的困惑是"课名明明在列表里，程序却说没开" —— 十有八九是课程代码写错。
+ * 只有把相似条目点出来，用户才会意识到问题在代码而不是在课。
+ */
+test('findSimilar：名字高度相似的排在前面，毫不相干的要丢掉', () => {
+  const items = [
+    { kcmc: '乒乓球（提高班）', kch: 'X1' },
+    { kcmc: '羽毛球', kch: 'X2' },
+    { kcmc: '高等数学', kch: 'X3' },
+  ];
+  const near = findSimilar(items, { courseName: { include: ['乒乓球'] } }, FIELDS, 3);
+  assert.equal(near.length, 1, '只应命中名字相关的，不能把羽毛球/高数也列出来');
+  assert.equal(near[0].name, '乒乓球（提高班）');
+});
+
+test('findSimilar：代码前缀相同也算线索（改版后课程代码变体）', () => {
+  const fields = { name: 'kcmc', code: 'kch' };
+  const near = findSimilar([{ kcmc: '某课', kch: '4005014' }], { courseCode: { exact: ['4005013'] } }, fields);
+  assert.equal(near.length, 1);
+  assert.ok(near[0].score > 0);
+});
+
+test('findSimilar：完全无关时返回空数组，不要硬凑', () => {
+  assert.deepEqual(findSimilar([{ kcmc: '高等数学', kch: 'X3' }], { courseName: { include: ['乒乓球'] } }, FIELDS), []);
 });

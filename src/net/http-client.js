@@ -23,6 +23,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { CookieJar } from './cookiejar.js';
 import { Clock } from './clock.js';
 import { computeDelay, isRetryableStatus, isRetryableNetworkError } from './backoff.js';
+import { summarizeError, httpStatusHint } from './error-info.js';
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -318,7 +319,8 @@ export class HttpClient {
           const delayMs = computeDelay(attempt, this.backoff, this.rng);
           this.stats.retries += 1;
           this.logger?.warn(
-            `${label} → HTTP ${res.status}，${delayMs}ms 后重试（第 ${attempt + 1}/${maxAttempts} 次）`,
+            `${label} → HTTP ${res.status}${httpStatusHint(res.status) ? `（${httpStatusHint(res.status).label}）` : ''}` +
+              `，${delayMs}ms 后重试（第 ${attempt + 1}/${maxAttempts} 次）`,
           );
           await this.sleep(delayMs);
           continue;
@@ -365,7 +367,7 @@ export class HttpClient {
         const delayMs = computeDelay(attempt, this.backoff, this.rng);
         this.stats.retries += 1;
         this.logger?.warn(
-          `${label} → ${describeError(err)}，${delayMs}ms 后重试（第 ${attempt + 1}/${maxAttempts} 次）`,
+          `${label} → ${summarizeError(err)}，${delayMs}ms 后重试（第 ${attempt + 1}/${maxAttempts} 次）`,
         );
         await this.sleep(delayMs);
       }

@@ -186,3 +186,62 @@ export function explainMiss(items, target, fields = {}, limit = 3) {
     .filter((r) => !r.hit)
     .slice(0, limit);
 }
+
+function commonPrefix(a, b) {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i += 1;
+  return i;
+}
+
+/**
+ * 在列表里找"看起来就是同一门课、但代码对不上"的条目。
+ *
+ * 为什么和 explainMiss 分开：explainMiss 回答"这一条为什么没命中"（需要列出所有未命中），
+ * 这个回答"列表里有没有长得像的"（需要**排序**并丢掉毫不相干的）。
+ * 抢课现场最典型的困惑是"课程名字明明在列表里，为什么说没开" —— 多半是课程代码写错了，
+ * 只有把相似条目点出来，用户才会意识到问题在代码而不是在课。
+ *
+ * @returns {Array<{item:object, name:string, code:string, score:number}>}
+ */
+export function findSimilar(items, target, fields = {}, limit = 3) {
+  const wantNames = [
+    ...(Array.isArray(target?.courseName?.include) ? target.courseName.include : []),
+    typeof target?.courseName === 'string' ? target.courseName : null,
+    target?.alias ?? null,
+    target?._name ?? null,
+  ]
+    .filter(Boolean)
+    .map((s) => normalizeText(s));
+
+  const wantCodes = [
+    ...(Array.isArray(target?.courseCode?.exact) ? target.courseCode.exact : []),
+    ...(Array.isArray(target?.courseCode?.include) ? target.courseCode.include : []),
+  ]
+    .filter(Boolean)
+    .map((s) => String(s).trim().toUpperCase());
+
+  const scored = [];
+  for (const item of items ?? []) {
+    const rawName = extractField(item, fields.name ?? 'kcmc') ?? '';
+    const rawCode = String(extractField(item, fields.code ?? 'kch') ?? '').trim();
+    const name = normalizeText(rawName);
+    let score = 0;
+
+    for (const want of wantNames) {
+      if (!want || !name) continue;
+      if (name === want) score = Math.max(score, 100);
+      else if (name.includes(want) || want.includes(name)) score = Math.max(score, 80);
+      else if (commonPrefix(name, want) >= 2) score = Math.max(score, 40);
+    }
+    for (const code of wantCodes) {
+      if (!rawCode || !code) continue;
+      if (rawCode.toUpperCase() === code) score = Math.max(score, 90);
+      else if (commonPrefix(rawCode.toUpperCase(), code) >= 4) score = Math.max(score, 30);
+    }
+
+    if (score > 0) scored.push({ item, name: rawName, code: rawCode, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit);
+}

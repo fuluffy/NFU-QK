@@ -2,7 +2,7 @@
   "name": "ggxxk-xsxkkc",
   "label": "公选课（通识选修）— xsxkkc 族",
   "school": "NJFU",
-  "_status": "PARTIAL —— 2026-11-03 实测：请求链路与形状已确认（warmup + query 串），但服务端返回 iTotalRecords:0，字段映射仍未验证",
+  "_status": "PARTIAL —— 2026-11-03 17:00 实测：列表 174 门、7 门目标全部命中、字段映射（kch/kcmc/pkrs/xkrs/szkcflmc）确认；提交（ggxxkxkOper）仍未经真机验证 —— 当天目标全部满员或本学期未排课，没有可提交的机会",
   "_notes": [
     "2026-11-03 13:10 实测结论（重要，别再踩）：",
     "  ① 必须先进上下文：GET xklc_list（取 toxk('轮次ID')）→ GET xsxk_index?jx0502zbid=ID → GET comeInGgxxkxk。",

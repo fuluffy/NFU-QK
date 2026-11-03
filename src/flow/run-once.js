@@ -15,6 +15,7 @@ import { Clock } from '../net/clock.js';
 import { FlowEngine } from '../flow/engine.js';
 import { Runner } from '../flow/runner.js';
 import { TargetStore } from '../state/store.js';
+import { validateConfig } from './config-rules.js';
 
 export class ConfigError extends Error {
   constructor(message, code = 'CONFIG') {
@@ -70,6 +71,20 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
   if (profile._status && !String(profile._status).startsWith('VERIFIED')) {
     logger.warn(`⚠️ 接口状态：${profile._status}`);
     logger.warn('   它有依据，但没对当前学期验证过。实跑时盯住「列表条数」——若为 0，大概率是接口已变。');
+  }
+
+  // 配置体检必须在发第一个请求之前做完。
+  // 这些错误以前要到"跑起来之后"才暴露：缺 id 的目标会被合并成一个、没有定位维度的目标
+  // 会匹配到任意课程、桶引用错 id 会让某个类别永远沉默 —— 全是**看不出来的**失败。
+  {
+    const { errors, warnings } = validateConfig(config);
+    if (errors.length) {
+      throw new ConfigError(
+        `配置有 ${errors.length} 处问题，先修好再跑：\n  - ${errors.join('\n  - ')}`,
+        'CONFIG_INVALID',
+      );
+    }
+    for (const w of warnings) logger.warn(`配置提醒：${w}`);
   }
 
   const sessionFile = path.resolve(root, config.auth?.sessionFile ?? 'state/session.json');

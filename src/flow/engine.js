@@ -276,19 +276,40 @@ export class FlowEngine {
     const res = await this.callStep(listStep, ctx);
     this.stats.lists += 1;
 
+    // 先看 HTTP 状态，再看内容。
+    //
+    // 顺序很关键：高峰期教务系统会回 502/503 或一整页错误 HTML，若直接按"不是 JSON"
+    // 处理，会被说成"请求形状不对、去改 profile" —— 方向完全错了，改一晚上也没用。
+    // 5xx / 429 / 403 是**上游或风控**的问题，用可重试的错误表达，让上层退避。
+    if (res.status >= 500 || res.status === 429 || res.status === 403) {
+      const err = new Error(
+        `列表接口返回 HTTP ${res.status}` +
+          (res.status >= 500 ? '（教务系统自己在报错）' : '（被限流或风控）') +
+          `，响应 ${res.text?.length ?? 0}B / 标题「${titleOf(res.text)}」`,
+      );
+      err.kind = res.status >= 500 ? 'http-5xx' : res.status === 429 ? 'http-429' : 'http-403';
+      err.status = res.status;
+      err.retryable = true;
+      throw err;
+    }
+
     // 列表的 extract 是 jsonpath，意味着"必须是 JSON"。
     // 解析不出 JSON 时 extractItems 会返回 []，与"服务端确实没有课"无法区分 ——
     // 这正是 2026-11-03 空跑两小时的根因：请求形状不对 → 拿到空 JSP 模板 →
     // 被读成"0 条" → 一直在等一个永远不会来的数据。宁可报错，也不要沉默。
     if (res.json === null && typeof listStep.extract?.items === 'string' && listStep.extract.items.startsWith('$')) {
       const head = (res.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
-      throw new FlowConfigError(
+      const err = new FlowConfigError(
         `列表接口返回的不是 JSON：HTTP ${res.status} / ${res.text?.length ?? 0}B / ` +
           `标题「${titleOf(res.text)}」。\n` +
           `  这不是"没有课"，而是请求没被当成选课列表处理。常见原因：` +
           `筛选条件没走 URL 查询串、或没先进入选课上下文（profile.warmup）。\n` +
           `  响应开头：${head}`,
       );
+      // 让上层能把它分类成"接口形状不符"，而不是笼统的"未知错误"
+      err.kind = 'list-shape';
+      err.status = res.status;
+      throw err;
     }
 
     let items = extractItems(res.json, listStep.extract?.items);
@@ -351,7 +372,12 @@ export class FlowEngine {
         loose.label = this.describeItem(loose.item);
         return { bucketId: bucket.id, status: 'found-full', match: loose, count: items.length };
       }
-      return { bucketId: bucket.id, status: 'no-match', count: items.length };
+      // 区分"没匹配上"和"列表里根本没有这些课" —— 两者对用户的意义完全不同：
+      // 前者要查课程代码/字段映射，后者说明这门课这学期没排班，只能换课。
+      // 不做这个区分的话，日志里一律显示"无候选"，用户会一直等一门永远不会出现的课。
+      const absent = targets.length > 0
+        && targets.every((t) => !items.some((it) => matchItem(it, t, fields).hit));
+      return { bucketId: bucket.id, status: 'no-match', count: items.length, absent };
     });
 
     return { status: 'ok', count: items.length, items, results };

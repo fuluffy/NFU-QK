@@ -12,12 +12,15 @@
 
 import http from 'node:http';
 import path from 'node:path';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 import { createLogger } from '../util/logger.js';
 import { loadProfile, checkProfile, listProfileNames } from '../flow/profile.js';
 import { SessionLogin } from '../auth/session-login.js';
+import { loadCatalog, saveCatalog, importBuffer, guessTerm, isOpenInTerm, TERM_LABEL } from '../catalog/import.js';
+import { validateConfig, resolveMaxBuckets, normalizeConfig } from '../flow/config-rules.js';
+import { precheck } from '../flow/precheck.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -124,14 +127,34 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
   }
 
   async function catalog() {
-    for (const f of ['data/catalog-2026-autumn.json', 'data/catalog.json']) {
-      try {
-        return JSON.parse(await readFile(path.resolve(root, f), 'utf8'));
-      } catch {
-        /* 继续找 */
-      }
+    const { courses, meta } = await loadCatalog(root);
+    return { courses, meta };
+  }
+
+  /** 课程库的"统计摘要"，前端拿它渲染学期/类别筛选，不用自己算一遍。 */
+  async function catalogInfo() {
+    const { courses, meta } = await catalog();
+    const terms = { spring: 0, autumn: 0, summer: 0, unknown: 0 };
+    for (const c of courses) {
+      const t = Array.isArray(c.terms) ? c.terms : [];
+      if (!t.length) terms.unknown += 1;
+      for (const k of t) terms[k] = (terms[k] ?? 0) + 1;
     }
-    return { courses: [] };
+    const categories = {};
+    const units = {};
+    for (const c of courses) {
+      const cat = c.category || '（未分类）';
+      categories[cat] = (categories[cat] ?? 0) + 1;
+      const unit = c.unit || '（未填单元）';
+      units[unit] = (units[unit] ?? 0) + 1;
+    }
+    return {
+      count: courses.length,
+      meta,
+      terms,
+      categories,
+      units,
+    };
   }
 
   async function sessionInfo() {
@@ -249,6 +272,9 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
     const cfg = state.config ?? (await loadConfigFile());
     const profileName = cfg.profile ?? 'ggxxk-xsxkkc';
     const profile = await loadProfile(profileName);
+    // 顺序：先登录、再配置。
+    // 全新用户两样都缺，先说"还没登录"才有指向性 —— 说"类别数为 0"他会去翻配置，
+    // 而真正挡着他的是第 1 步。
     const sess = await sessionInfo();
     if (!sess.exists) throw httpError(400, '还没有登录，请先完成第 1 步');
     if (!sess.usable) {
@@ -256,6 +282,13 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
         400,
         '登录状态已失效（没有教务系统的会话 Cookie）。回到第 1 步重新登录一次，通常几秒就好。',
       );
+    }
+    // 开抢前做严格校验：配置有硬伤就一个请求都不该发出去。
+    // 这些错误（目标缺 id、类别引用不存在的目标、候选为空）在旧版里要跑起来才暴露，
+    // 而那时候人已经在盯着倒计时了。
+    const { errors } = validateConfig(cfg);
+    if (errors.length) {
+      throw httpError(400, `配置有 ${errors.length} 处问题，先修好再开抢：${errors.join('；')}`);
     }
 
     state.logs.length = 0;
@@ -327,8 +360,17 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
       state.config = cfg;
       const names = listProfileNames();
       const profiles = await Promise.all(names.map(profileInfo));
+      const cat = await catalog();
+      const info = await catalogInfo();
       return json(res, {
-        catalog: await catalog(),
+        courses: cat.courses,
+        catalogInfo: {
+          count: info.count,
+          meta: info.meta,
+          terms: info.terms,
+          categories: info.categories,
+          units: info.units,
+        },
         config: cfg,
         configPath: state.configPath,
         session: await sessionInfo(),
@@ -338,7 +380,106 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
         message: state.message,
         job: jobState(),
         lastResult: state.lastResult,
+        maxBuckets: resolveMaxBuckets(cfg),
+        term: cfg.ui?.term ?? guessTerm(),
       });
+    }
+
+    // ── 课程库 ─────────────────────────────────────────────
+    if (route === '/api/catalog') {
+      const cat = await catalogInfo();
+      return json(res, { ...cat, courses: (await catalog()).courses });
+    }
+
+    /**
+     * 导入课程表。前端把文件读成 base64 传过来 —— 不是为了省事，
+     * 而是避免在零依赖的前提下手写 multipart/form-data 解析（那是一堆边界条件的深渊）。
+     * 26KB 的课表 base64 之后也就 35KB，代价可以忽略。
+     */
+    if (route === '/api/catalog/import' && req.method === 'POST') {
+      const body = await readBody(req, { limit: 16 * 1024 * 1024 });
+      const filename = String(body.filename ?? '导入.xlsx');
+      const b64 = String(body.base64 ?? '');
+      if (!b64) throw httpError(400, '没有收到文件内容');
+      let buf;
+      try {
+        buf = Buffer.from(b64, 'base64');
+      } catch {
+        throw httpError(400, '文件内容不是合法的 base64');
+      }
+      if (!buf.length) throw httpError(400, '文件是空的');
+
+      const term = body.term ?? state.config?.ui?.term ?? guessTerm();
+      let result;
+      try {
+        result = importBuffer(buf, { filename, term });
+      } catch (err) {
+        // 解析失败是最常见的一类（旧版 .xls / GBK 的 csv / 不是课程表），
+        // 原文已经是中文建议，直接交给前端显示
+        throw httpError(err.status ?? 422, err.message);
+      }
+
+      if (body.dryRun) {
+        return json(res, {
+          ok: true,
+          dryRun: true,
+          stats: result.stats,
+          warnings: result.warnings,
+          sheets: result.sheets,
+          preview: result.catalog.courses.slice(0, 8),
+        });
+      }
+
+      const file = await saveCatalog(root, result.catalog);
+      uiLogger.info(
+        `课程库已导入：${filename} → ${result.stats.courses} 门课` +
+          `（本学期 ${TERM_LABEL[term] ?? term} 开 ${result.stats.openNow} 门，跳过 ${result.stats.skipped.length} 行）`,
+      );
+      return json(res, {
+        ok: true,
+        file,
+        stats: result.stats,
+        warnings: result.warnings,
+        sheets: result.sheets,
+        meta: result.catalog.meta,
+        courses: result.catalog.courses,
+      });
+    }
+
+    // 恢复成随包附带的课程库（删掉自己导入的那份）
+    if (route === '/api/catalog/reset' && req.method === 'POST') {
+      await rm(path.resolve(root, 'data/catalog.json'), { force: true });
+      uiLogger.info('已移除自己导入的课程库，回到随包附带的那份');
+      const cat = await catalogInfo();
+      return json(res, { ok: true, ...cat, courses: (await catalog()).courses });
+    }
+
+    /**
+     * 候选体检：只读地拉一次实时列表，逐门核对。
+     * 这个接口存在的唯一目的是**把"为什么没抢到"说清楚**，它不提交任何东西。
+     */
+    if (route === '/api/precheck' && req.method === 'POST') {
+      if (state.job) throw httpError(409, '有任务在跑，等它结束或先停止');
+      const cfg = state.config ?? (await loadConfigFile());
+      const profileName = cfg.profile ?? 'ggxxk-xsxkkc';
+      const profile = await loadProfile(profileName);
+      const sess = await sessionInfo();
+      if (!sess.usable) {
+        return json(res, {
+          ok: false,
+          stage: 'session',
+          reason: '本地没有可用的登录态',
+          hint: '先在第 1 步登录，再回来体检。',
+        });
+      }
+      uiLogger.info('开始体检：只读地拉一次课程列表，不会提交任何选课请求…');
+      const out = await precheck({ config: cfg, profile, root, logger: uiLogger });
+      if (out.ok) {
+        uiLogger.info(`体检完成：列表 ${out.listCount} 门｜${out.verdict}`);
+      } else {
+        uiLogger.warn(`体检未通过（${out.stage}）：${out.reason}`);
+      }
+      return json(res, out);
     }
 
     if (route === '/api/events') {
@@ -388,8 +529,14 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
 
     if (route === '/api/save' && req.method === 'POST') {
       const body = await readBody(req);
-      const file = await saveConfigFile(body.config);
-      return json(res, { ok: true, file });
+      // 保存 = 存草稿，不做硬拦截。
+      // 界面里"刚新建一个类别还没挑课"是**合法中间态**，这时如果拒绝保存，
+      // 用户每改一步都要先补完所有必填项，用起来会非常难受。
+      // 真正的硬校验放在 /api/run —— 那时候再不合规就不能开抢。
+      const cfg = normalizeConfig(body.config ?? {});
+      const file = await saveConfigFile(cfg);
+      const { errors, warnings } = validateConfig(cfg);
+      return json(res, { ok: true, file, errors, warnings });
     }
 
     if (route === '/api/run' && req.method === 'POST') {
@@ -503,14 +650,14 @@ function json(res, payload, status = 200) {
   res.end(body);
 }
 
-function readBody(req) {
+function readBody(req, { limit = 4 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     req.on('data', (c) => {
       size += c.length;
-      if (size > 4 * 1024 * 1024) {
-        reject(httpError(413, '请求体过大'));
+      if (size > limit) {
+        reject(httpError(413, `请求体过大（上限 ${Math.round(limit / 1024 / 1024)}MB）`));
         req.destroy();
         return;
       }

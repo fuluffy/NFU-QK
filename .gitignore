@@ -31,3 +31,8 @@ Desktop.ini
 
 # ── 个人选课配置：由配置界面生成，含个人志愿，不入库 ──────────
 /config.ggxxk.json
+
+# ── 自己导入的课程表：每个人学校发的表可能不同，不入库 ──────────
+# 随包附带的 data/catalog-2026*.json 才是仓库里的那份；
+# data/catalog.json 是界面「导入课程表」写出来的，属于个人数据。
+/data/catalog.json

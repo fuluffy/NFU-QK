@@ -12,15 +12,22 @@
  *     也不要在开抢后因为前三门都满了而空手。
  *   - 但抢到的课是**真的要上一学期**。所以生成后必须在界面上把不想上的删掉。
  */
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
+
+import { loadCatalog, isOpenInTerm } from '../src/catalog/import.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const args = parseArgs(process.argv.slice(2));
 
-const catalog = JSON.parse(await readFile(path.join(ROOT, 'data/catalog-2026-autumn.json'), 'utf8'));
-const courses = catalog.courses;
-if (!courses.length) throw new Error('课程库为空，先跑一次提取');
+const { courses: allCourses } = await loadCatalog(ROOT);
+if (!allCourses.length) throw new Error('课程库为空，先在界面里导入一份课程表');
+
+// 只取当前学期会开的课：课程表里「春」的课秋季根本不会排教学班，
+// 放进兜底链只会让日志里多一堆"无候选"，还白白拉长轮询。
+const term = args.term ?? 'autumn';
+const courses = allCourses.filter((c) => isOpenInTerm(c, term));
+console.log(`课程库 ${allCourses.length} 门，其中 ${term === 'autumn' ? '秋' : term === 'spring' ? '春' : term} 季开课 ${courses.length} 门`);
 
 const keep = args.keep ? new Set(String(args.keep).split(',').map((s) => s.trim()).filter(Boolean)) : null;
 

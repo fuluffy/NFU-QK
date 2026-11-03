@@ -12,11 +12,14 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { loadCatalog } from '../src/catalog/import.js';
+
 const ROOT = path.resolve(import.meta.dirname, '..');
 const prefill = process.argv.includes('--prefill');
 
-const catalog = JSON.parse(await readFile(path.join(ROOT, 'data/catalog-2026-autumn.json'), 'utf8'));
-const courses = catalog.courses;
+// 统一走 loadCatalog：优先用用户自己导入的课表，其次随包附带的那份
+const { courses } = await loadCatalog(ROOT);
+if (!courses.length) throw new Error('课程库是空的，先在界面里导入一份课程表');
 
 const ACCEPT = {
   green: (c) => c.category === '绿色文明',

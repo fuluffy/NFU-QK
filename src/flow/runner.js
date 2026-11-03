@@ -10,7 +10,14 @@
 
 import { SessionExpiredError } from './engine.js';
 import { SlidingWindowLimiter, computeDelay } from '../net/backoff.js';
+import { classifyError } from '../net/error-info.js';
 import { STATUS } from '../state/store.js';
+
+/** 日志里出错信息常常很长（带响应开头），截一段够定位就行。 */
+function shortMessage(err, max = 160) {
+  const msg = String(err?.message ?? err ?? '').replace(/\s+/g, ' ').trim();
+  return msg.length > max ? `${msg.slice(0, max)}…` : msg;
+}
 
 export class Runner {
   /**
@@ -51,6 +58,8 @@ export class Runner {
      */
     this.logThrottleMs = opts.logThrottleMs ?? 15_000;
     this.throttleAt = new Map();
+    /** 错误分类计数：category → 次数。跑完能一眼看出"到底在跟什么斗"。 */
+    this.errKinds = new Map();
     /** 满员降级：目标 id → 首次发现满员的时间 / 已降级集合 */
     this.fullSince = new Map();
     this.demoted = new Set();
@@ -205,10 +214,17 @@ export class Runner {
           continue;
         }
 
+        // 分类播报：同样是"失败"，超时 / 证书 / 5xx / 限流的处置完全不同。
+        // 统一写成"网络异常"会把人带错方向（2026-11-03 踩过：证书过期被当成网络抖动查了一小时）。
+        const info = classifyError(err);
+        this.errKinds.set(info.category, (this.errKinds.get(info.category) ?? 0) + 1);
+
         const delay = computeDelay(Math.min(this.counters.netErrors - 1, 5), this.backoff, this.rng);
         this.logger?.warn(
-          `网络异常（累计 ${this.counters.netErrors} 次）：${err.message ?? err} → ${delay}ms 后继续`,
+          `${info.label}（累计 ${this.counters.netErrors} 次）：${shortMessage(err)} → ${delay}ms 后重试`,
         );
+        // 处置建议每个类别只播一次，避免把日志刷满
+        this.logThrottled(`hint:${info.category}`, `  ↳ ${info.hint}`);
         await this.sleep(delay);
         continue;
       }
@@ -220,7 +236,20 @@ export class Runner {
     if (this.stopped) outcome = 'stopped';
     const summary = this.store.summary();
     this.logger?.info(`结束（${outcome}）：成功 ${summary.succeeded}/${summary.total}｜轮询 ${this.counters.cycles} 次`);
-    return { outcome, cycles: this.counters.cycles, summary, counters: { ...this.counters } };
+    // 出错分类汇总 —— 只报"失败了 N 次"没有信息量，要能看出是超时多还是被限流多
+    if (this.errKinds.size) {
+      const parts = [...this.errKinds.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, n]) => `${classifyError({ kind: k }).label}×${n}`);
+      this.logger?.info(`异常构成：${parts.join('、')}`);
+    }
+    return {
+      outcome,
+      cycles: this.counters.cycles,
+      summary,
+      counters: { ...this.counters },
+      errorKinds: Object.fromEntries(this.errKinds),
+    };
   }
 
   /**
@@ -412,7 +441,17 @@ export class Runner {
       const got = this.bucketCredits.get(bucket.id) ?? 0;
 
       if (r.status === 'no-match') {
-        progress.push(`${tag} ${got}/${bucket.needCredits} 无候选`);
+        progress.push(`${tag} ${got}/${bucket.needCredits} ${r.absent ? '没排课' : '无候选'}`);
+        if (r.absent) {
+          // "列表里根本没有这些课"是最容易被误解成"再等等就有了"的状态。
+          // 必须说清：这不是满员、不是接口坏了，是这门课本学期没开。
+          this.logThrottled(
+            `bucket-absent:${bucket.id}`,
+            `「${tag}」的候选课本学期都没排教学班（列表 ${poll.count} 条里查无此课）` +
+              ` —— 不是满员，等也不会出现，建议换几门候选`,
+            'warn',
+          );
+        }
         continue;
       }
       if (r.status === 'found-full') {

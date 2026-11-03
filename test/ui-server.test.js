@@ -44,11 +44,15 @@ test('bootstrap 给出界面启动所需的全部数据', async () => {
     const res = await app.get('/api/bootstrap');
     assert.equal(res.status, 200);
     const d = await res.json();
-    assert.ok(Array.isArray(d.catalog.courses), 'catalog.courses 应为数组');
-    assert.ok(d.catalog.courses.length > 0, '课程库不应为空');
+    assert.ok(Array.isArray(d.courses), 'courses 应为数组');
+    assert.ok(d.courses.length > 0, '课程库不应为空');
     assert.ok(d.config && typeof d.config === 'object', '应带出配置');
     assert.ok(d.session && typeof d.session.exists === 'boolean');
     assert.ok(Array.isArray(d.profiles) && d.profiles.length > 0, '应列出可选 profile');
+    // 界面要靠这两项决定"学期筛选的默认值"和"最多几个类别"
+    assert.ok(d.catalogInfo && typeof d.catalogInfo.count === 'number');
+    assert.ok(Number(d.maxBuckets) >= 1, 'maxBuckets 必须给出来，否则界面不知道上限');
+    assert.ok(['autumn', 'spring', 'summer'].includes(d.term), 'term 应是本学期');
   } finally {
     await app.close();
   }
@@ -235,6 +239,172 @@ test('没有配置文件时，默认配置自带可用的 net 段', async () => 
       Number(d.config?.net?.connectTimeoutMs) >= 10000,
       '握手实测 300ms~40s，连接超时不能短于 10 秒',
     );
+  } finally {
+    await app.close();
+  }
+});
+
+// ─────────────────────────── 课程库导入 / 类别上限 ───────────────────────────
+
+const SHEET = [
+  ['序号', '课程代码', '课程名称', '类别', '课程单元', '开课学期', '学分'],
+  ['1', '4004002', '香味木材品鉴', '绿色文明', '绿色发展', '春', '1'],
+  ['2', '4005013', '工程经济管理概论', '社会认知', '组织管理', '春、秋', '1'],
+];
+
+/** 现场拼一个 xlsx（和真实导入走完全相同的路径：base64 → 解析 → 落盘） */
+async function xlsxBase64(rows) {
+  const { buildXlsx } = await import('./fixtures/build-xlsx.js');
+  return buildXlsx(rows).toString('base64');
+}
+
+test('导入课程表：真的解析、真的落盘，并回报统计', async () => {
+  const app = await boot();
+  try {
+    const base64 = await xlsxBase64(SHEET);
+    const res = await app.post('/api/catalog/import', {
+      filename: '课表.xlsx',
+      base64,
+      term: 'autumn',
+    });
+    const d = await res.json();
+    assert.equal(res.status, 200, JSON.stringify(d));
+    assert.equal(d.ok, true);
+    assert.equal(d.stats.courses, 2);
+    assert.equal(d.stats.openNow, 1, '只有「春、秋」那门在秋季开');
+    assert.equal(path.basename(d.file), 'catalog.json');
+
+    // 落盘之后 bootstrap 读到的就是新课程库
+    const boot = await (await app.get('/api/bootstrap')).json();
+    assert.equal(boot.courses.length, 2);
+    assert.equal(boot.catalogInfo.meta.source, '课表.xlsx');
+  } finally {
+    await app.close();
+  }
+});
+
+test('导入预检（dryRun=true）不落盘', async () => {
+  const app = await boot();
+  try {
+    const res = await app.post('/api/catalog/import', {
+      filename: '课表.xlsx',
+      base64: await xlsxBase64(SHEET),
+      dryRun: true,
+    });
+    const d = await res.json();
+    assert.equal(d.dryRun, true);
+    assert.equal(d.stats.courses, 2);
+    // 目录里不该出现 catalog.json
+    await assert.rejects(readFile(path.join(app.root, 'data/catalog.json'), 'utf8'));
+  } finally {
+    await app.close();
+  }
+});
+
+test('导入非课程表：返回可读的错误，而不是 500 或空数组', async () => {
+  const app = await boot();
+  try {
+    const res = await app.post('/api/catalog/import', {
+      filename: '随便.xlsx',
+      base64: await xlsxBase64([['说明'], ['这不是课程表']]),
+    });
+    const d = await res.json();
+    assert.equal(res.status, 422);
+    assert.match(d.error, /没能|课程/);
+  } finally {
+    await app.close();
+  }
+});
+
+test('导入旧版 .xls：告诉用户另存为 xlsx，而不是抛二进制错误', async () => {
+  const app = await boot();
+  try {
+    const ole = Buffer.alloc(64);
+    ole.writeUInt32BE(0xd0cf11e0, 0);
+    const res = await app.post('/api/catalog/import', { filename: 'a.xls', base64: ole.toString('base64') });
+    const d = await res.json();
+    assert.equal(res.status, 422);
+    assert.match(d.error, /另存为/);
+  } finally {
+    await app.close();
+  }
+});
+
+test('恢复随包课程库：删掉自己导入的那份', async () => {
+  const app = await boot();
+  try {
+    await app.post('/api/catalog/import', {
+      filename: '课表.xlsx',
+      base64: await xlsxBase64(SHEET),
+      term: 'autumn',
+    });
+    const res = await app.post('/api/catalog/reset');
+    const d = await res.json();
+    assert.equal(d.ok, true);
+    assert.equal(d.count, 0, '临时目录里没有随包课程库，应为 0');
+  } finally {
+    await app.close();
+  }
+});
+
+test('保存含问题的配置：照样存（草稿），但把问题带回来', async () => {
+  const app = await boot();
+  try {
+    const d = await (await app.post('/api/save', {
+      config: { targets: [], buckets: [], profile: 'ggxxk-xsxkkc' },
+    })).json();
+    assert.equal(d.ok, true, '草稿必须能存 —— 否则用户每改一步都被卡住');
+    assert.ok(Array.isArray(d.errors) && d.errors.length > 0, '要带回"至少一个类别"这类问题');
+  } finally {
+    await app.close();
+  }
+});
+
+test('有正确的会话但配置不合法：拒绝开抢并说明原因', async () => {
+  const app = await boot();
+  try {
+    await mkdir(path.join(app.root, 'state'), { recursive: true });
+    await writeFile(
+      path.join(app.root, 'state/session.json'),
+      JSON.stringify([{ name: 'bzb_njw', value: 'x', domain: 'jwxt.njfu.edu.cn', path: '/' }]),
+      'utf8',
+    );
+    const res = await app.post('/api/run', { live: false });
+    const d = await res.json();
+    assert.equal(res.status, 400);
+    assert.match(d.error, /类别/);
+  } finally {
+    await app.close();
+  }
+});
+
+test('达到类别上限后，服务端也拒绝超限的配置', async () => {
+  const app = await boot();
+  try {
+    const n = 5;
+    const cfg = {
+      profile: 'ggxxk-xsxkkc',
+      targets: Array.from({ length: n }, (_, i) => ({ id: `t${i}`, courseCode: { exact: [`C${i}`] }, credits: 1 })),
+      buckets: Array.from({ length: n }, (_, i) => ({ id: `b${i}`, label: `类${i}`, needCredits: 1, targets: [`t${i}`] })),
+    };
+    const d = await (await app.post('/api/save', { config: cfg })).json();
+    assert.ok(d.errors.some((e) => /最多 4 个类别/.test(e)));
+
+    // 把上限调到 5 之后，同样的配置就合法了
+    const ok = await (await app.post('/api/save', { config: { ...cfg, ui: { maxBuckets: 5 } } })).json();
+    assert.deepEqual(ok.errors, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('没有会话时体检：不崩，直接说去登录', async () => {
+  const app = await boot();
+  try {
+    const d = await (await app.post('/api/precheck')).json();
+    assert.equal(d.ok, false);
+    assert.equal(d.stage, 'session');
+    assert.match(d.hint, /登录/);
   } finally {
     await app.close();
   }
