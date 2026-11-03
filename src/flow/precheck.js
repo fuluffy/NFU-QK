@@ -133,14 +133,31 @@ export async function precheck({ config, profile, root, logger = null }) {
 
     const buckets = (config.buckets ?? []).map((b) => {
       const mine = targets.filter((t) => b.targets?.includes(t.id));
+      // 限定条件单独统计：它决定"总学分够了也不算完"的那部分，
+      // 体检时若能看出限定单元一门余量都没有，就该在开抢前换课。
+      const groups = (b.groups ?? []).map((g) => {
+        const gm = mine.filter((t) => g.targets?.includes(t.id));
+        return {
+          id: g.id,
+          label: g.label ?? g.id,
+          needCredits: Number(g.needCredits ?? 0),
+          available: gm.filter((t) => t.status === 'available').length,
+          full: gm.filter((t) => t.status === 'full').length,
+          missing: gm.filter((t) => t.status === 'missing').length,
+          total: gm.length,
+        };
+      });
       return {
         id: b.id,
         label: b.label ?? b.id,
         needCredits: Number(b.needCredits ?? 0),
+        totalCredits: Number(b.totalCredits ?? b.needCredits ?? 0),
+        earnedCredits: Number(b.earnedCredits ?? 0),
         available: mine.filter((t) => t.status === 'available').length,
         full: mine.filter((t) => t.status === 'full').length,
         missing: mine.filter((t) => t.status === 'missing').length,
         total: mine.length,
+        groups,
       };
     });
 

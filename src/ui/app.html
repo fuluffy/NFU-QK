@@ -279,6 +279,11 @@ button{font:inherit}
   font-size:10.5px;color:var(--faint);min-width:0;flex:1;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
+/* 限定条件的进度：总学分之外还要满足的那部分，必须跟"已修"分开显示 */
+.bkt-meta .subchip{
+  flex:none;font-size:10px;padding:1px 6px;border-radius:5px;
+  background:rgba(185,139,255,.14);color:#c9aaff;white-space:nowrap;
+}
 .more{
   flex:none;border:0;border-radius:6px;background:rgba(255,255,255,.05);
   color:var(--dim);font:inherit;font-size:10.5px;padding:2px 7px;cursor:pointer;transition:.13s;
@@ -538,6 +543,38 @@ button{font:inherit}
 .switchrow .tx small{display:block;color:var(--faint);font-size:10.5px;line-height:1.6;margin-top:2px}
 .switchrow.danger{border-color:rgba(255,107,107,.3);background:rgba(255,107,107,.05)}
 
+/* 学分要求：每类一行 —— 名字 | 需要 | 已取得 | 还需。
+   用 grid 而不是 flex，三列数字才能上下对齐；对不齐时人会看错行。 */
+.credit-rows{display:flex;flex-direction:column;gap:6px}
+.credit-empty{font-size:11.5px;color:var(--faint);padding:10px;border:1px dashed var(--line);border-radius:9px}
+.crow{
+  display:grid;grid-template-columns:minmax(56px,1fr) 72px 72px 56px;gap:7px;align-items:center;
+  padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.02);
+}
+.crow .nm{display:flex;align-items:center;gap:6px;min-width:0;font-size:12px}
+.crow .nm .cd{width:7px;height:7px;border-radius:50%;background:var(--c);flex:none}
+.crow .nm .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crow label{display:flex;flex-direction:column;gap:2px;font-size:9.5px;color:var(--faint);letter-spacing:.2px}
+.crow input{
+  background:rgba(255,255,255,.045);border:1px solid var(--line);border-radius:7px;
+  padding:4px 5px;color:var(--text);font:inherit;font-size:12px;width:100%;text-align:center;
+  font-variant-numeric:tabular-nums;
+}
+.crow input:focus{outline:none;border-color:rgba(122,162,255,.5)}
+.crow .left{font-size:10.5px;color:var(--faint);text-align:right;white-space:nowrap}
+.crow .left b{color:var(--text);font-size:11.5px}
+/* 限定条件从属于上面那一类：缩进 + 虚线，避免看成第四个类别 */
+.crow.sub{display:block;border-style:dashed;background:rgba(255,255,255,.008);padding:8px 9px 8px 14px}
+.crow.sub .subrule{font-size:11px;color:var(--dim);line-height:1.8}
+.crow.sub .subrule b{color:var(--text);font-weight:600}
+.crow.sub input{display:inline-block;width:46px;padding:2px 4px;margin:0 3px;vertical-align:baseline}
+.crow.sub .subnums{display:flex;align-items:flex-end;gap:10px;margin-top:4px}
+.crow.sub .subnums label{flex:1}
+.crow.sub .subnums input{width:70px;margin:0}
+.credit-foot{margin-top:8px;display:flex;justify-content:flex-end}
+.linkbtn{background:none;border:0;padding:0;color:var(--accent);font:inherit;font-size:11px;cursor:pointer;opacity:.85}
+.linkbtn:hover{opacity:1;text-decoration:underline}
+
 /* 体检结果 */
 .check-res{margin-top:10px;font-size:11.5px;line-height:1.7}
 .check-res .v{margin-bottom:8px;color:var(--text)}
@@ -548,6 +585,10 @@ button{font:inherit}
 .check-res .line .stt{flex:none;width:36px;font-size:10.5px}
 .check-res .line .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .check-res .line .h{color:var(--faint);font-size:10.5px;line-height:1.6;padding-left:44px}
+/* 限定条件的体检结论：补不上时要一眼看见，不能跟普通说明一个颜色 */
+.check-res .sublines{margin-bottom:8px;padding:6px 8px;border-radius:7px;background:rgba(255,255,255,.03)}
+.check-res .sublines .subwarn{color:var(--amber)}
+
 .stt.ok{color:var(--green)}.stt.warn{color:var(--amber)}.stt.bad{color:var(--danger)}
 
 /* 导入预览 */
@@ -853,6 +894,15 @@ button{font:inherit}
       </div>
 
       <div class="sect">
+        <h4>学分要求</h4>
+        <p class="note">学校要求每个类别修多少、你已经修到多少。程序只补差额 —— 已修满的类别会整个跳过，不会重复抢。</p>
+        <div id="creditRows" class="credit-rows"></div>
+        <div class="credit-foot">
+          <button class="linkbtn" id="btnCreditReset">恢复默认（绿色文明 2 / 创新创业 2 / 艺术审美 2）</button>
+        </div>
+      </div>
+
+      <div class="sect">
         <h4>网络</h4>
         <p class="note">学校服务器高峰期握手能超过 30 秒，超时设太短会把本来能过的请求判死。</p>
         <div class="row2">
@@ -968,6 +1018,16 @@ const S = {
 
 const TERM_NAME = { autumn: '秋', spring: '春', summer: '夏', all: '全部' };
 
+/**
+ * 学校的三类公选课要求。类别 id 不要改 —— 改了就认不出旧配置里的候选了。
+ *
+ * 艺术审美那条是**带限定条件的**：2 学分里至少 1 学分必须在「美学和艺术史论类」或
+ * 「艺术鉴赏和评论类」，剩下 1 学分可以来自「艺术体验和实践类」。
+ * 只按总学分凑满会白抢 —— 学校审核时这个类别不算数。
+ */
+const ART_UNITS = ['艺术审美（美学和艺术史论类）', '艺术审美（艺术鉴赏和评论类）', '艺术审美（艺术体验和实践类）'];
+const ART_SUB_UNITS = ['艺术审美（美学和艺术史论类）', '艺术审美（艺术鉴赏和评论类）'];
+
 const BUCKETS = [
   { id:'green', label:'绿色文明', need:2, color:'#3ddc97',
     rule:'类别 = 绿色文明',
@@ -976,9 +1036,31 @@ const BUCKETS = [
     rule:'课程单元 = 创新创业',
     accepts: c => c.unit === '创新创业' },
   { id:'art', label:'艺术审美', need:2, color:'#b98bff',
-    rule:'美学和艺术史论类 / 艺术鉴赏和评论类',
-    accepts: c => c.unit === '艺术审美（美学和艺术史论类）' || c.unit === '艺术审美（艺术鉴赏和评论类）' },
+    rule:'艺术审美三类单元 · 其中至少 1 学分须在美学和艺术史论类或艺术鉴赏和评论类',
+    accepts: c => ART_UNITS.includes(c.unit),
+    sub: { id:'sub', label:'美学和艺术史论类 / 艺术鉴赏和评论类', need:1, earned:0,
+      accepts: c => ART_SUB_UNITS.includes(c.unit) } },
 ];
+
+/**
+ * 标准三类的"模板"：删掉再建回来要能复刻同样的归属规则和限定条件。
+ * 从 BUCKETS 派生而不是另写一份 —— 两处各写一遍必然漂移。
+ */
+const PRESETS = Object.fromEntries(BUCKETS.map(b => [b.label, {
+  need: b.need,
+  rule: b.rule,
+  accepts: b.accepts,
+  sub: b.sub ? { ...b.sub } : undefined,
+}]));
+
+/** 一门课属于哪条标准要求（艺术审美的课程类别是「人文素养」，只能按单元认）。 */
+function presetLabelForCourse(c){
+  const unit = String(c?.unit ?? '');
+  if (ART_UNITS.includes(unit)) return '艺术审美';
+  if (unit === '创新创业') return '创新创业';
+  if (c?.category === '绿色文明') return '绿色文明';
+  return '';
+}
 const BK = new Map();
 const COLLAPSE_AT = 3;
 
@@ -1023,15 +1105,19 @@ function addBucket(label, need, opts = {}){
   if (dup) { dup.need = needNum; return dup; }
   if (BUCKETS.length >= S.maxBuckets) return null;
   const id = opts.id || nextBucketId();
+  // 重建标准类别时把它的归属规则和限定条件一起带上 —— 否则删掉「艺术审美」再加回来，
+  // 就变成一个只认总学分的普通类别，限定那 1 学分再也没人管。
+  const preset = opts.preset ?? PRESETS[name] ?? null;
   const def = {
     id,
     label: name,
     need: needNum,
     color: PALETTE[BUCKETS.length % PALETTE.length],
-    rule: `类别或单元 = ${name}`,
+    rule: preset?.rule ?? `类别或单元 = ${name}`,
     custom: true,
-    accepts: c => c.category === name || c.unit === name,
+    accepts: preset?.accepts ?? (c => c.category === name || c.unit === name),
   };
+  if (preset?.sub) def.sub = { ...preset.sub, earned: 0 };
   BUCKETS.push(def);
   reindexBuckets();
   return def;
@@ -1112,7 +1198,15 @@ function goStep(n){
 function renderSteps(){
   const logged = Boolean(S.session?.exists);
   // 空数组上 every() 恒为 true —— 类别删空时第 2 步绝不能打勾
-  const ready = BUCKETS.length > 0 && BUCKETS.every(b => stateNeed(b.id) === 0 || chainCredits(b.id) >= stateNeed(b.id));
+  const ready = BUCKETS.length > 0 && BUCKETS.every(b => {
+    const { needsWork, need, subShort } = bucketGap(b);
+    if (!needsWork) return true;
+    // 学分凑够还不够：限定那部分也得在候选里有人能顶
+    const covered = chainCredits(b.id) >= need;
+    const subCovered = !subShort || !b.sub
+      || chainOf(b.id).some(code => { const c = S.byCode.get(code); return c && b.sub.accepts(c); });
+    return covered && subCovered;
+  });
   $('#n1').textContent = logged ? '✓' : '1';
   $('#n2').textContent = ready ? '✓' : '2';
   $('#n3').textContent = '3';
@@ -1134,6 +1228,19 @@ function stateNeed(bid){
   const got = S.earned[bid] || 0;
   const need = Math.max(0, (BK.get(bid)?.need ?? 0) - got);
   return need;
+}
+
+/**
+ * 这个类别还差什么：总学分差额 + 限定条件差额。
+ * 两者要分开看 —— "总学分已修满、限定那 1 学分还没着落"是真实存在的状态，
+ * 只看总分会把它当成已完成，然后学校审核不认。
+ */
+function bucketGap(b){
+  const need = stateNeed(b.id);
+  const subShort = b.sub
+    ? Math.max(0, (Number(b.sub.need) || 0) - (Number(b.sub.earned) || 0))
+    : 0;
+  return { need, subShort, needsWork: need > 0 || subShort > 0 };
 }
 
 // ── 引导：加载初始数据 ──────────────────────────────────────
@@ -1223,7 +1330,25 @@ function applyConfig(cfg){
     if (!def) def = addBucket(bucket.label || bucket.id, Number(bucket.needCredits ?? 0), { id: bucket.id });
     if (!def) continue;
     const need = Number(bucket.needCredits ?? 0);
-    S.earned[def.id] = Math.max(0, (def.need ?? 0) - need);
+    // 老配置只有 needCredits（差额），那就按"总需 = 差额、已修 = 0"理解；
+    // 新配置带 totalCredits / earnedCredits，卡片上才能原样还原"需 2、已修 1"。
+    const total = Number(bucket.totalCredits);
+    if (bucket.totalCredits !== undefined && Number.isFinite(total) && total >= 0) def.need = total;
+    const earned = Number(bucket.earnedCredits);
+    S.earned[def.id] = bucket.earnedCredits !== undefined && Number.isFinite(earned) && earned >= 0
+      ? earned
+      : Math.max(0, (def.need ?? 0) - need);
+    if (def.sub) {
+      const g = (bucket.groups ?? []).find(x => x.id === def.sub.id) ?? (bucket.groups ?? [])[0];
+      if (g) {
+        const gt = Number(g.totalCredits);
+        if (g.totalCredits !== undefined && Number.isFinite(gt) && gt >= 0) def.sub.need = gt;
+        const ge = Number(g.earnedCredits);
+        def.sub.earned = g.earnedCredits !== undefined && Number.isFinite(ge) && ge >= 0
+          ? ge
+          : Math.max(0, (def.sub.need ?? 0) - Number(g.needCredits ?? 0));
+      }
+    }
     for (const tid of bucket.targets ?? []) {
       const t = targets.get(tid);
       if (!t) continue;
@@ -1478,17 +1603,18 @@ function renderPool(){
 
 /**
  * 点了一门"不属于任何已有类别"的课 —— 自动建类别，别让用户先去建再回来点。
- * 名字优先用「课程单元」（更细：创新创业 / 组织管理…），没有再退到「类别」。
- * 学分先按这门课的学分给个默认值，用户可以在卡片上改（或删掉重建）。
+ * 优先按标准三类建（绿色文明 / 创新创业 / 艺术审美），这样能带上正确的归属规则
+ * 和限定条件；认不出来的再退到「课程单元」→「类别」，建个普通类别。
  */
 function ensureBucketFor(c){
-  const label = String(c.unit || c.category || '').trim();
+  const preset = presetLabelForCourse(c);
+  const label = preset || String(c.unit || c.category || '').trim();
   if (!label) return null;
   if (BUCKETS.length >= S.maxBuckets) {
     toast(`已有 ${S.maxBuckets} 个类别（上限）—— 先在高级设置里调高上限，或删掉一个不用的类别`);
     return null;
   }
-  const def = addBucket(label, Math.max(1, Number(c.credits) || 1));
+  const def = addBucket(label, PRESETS[label]?.need ?? Math.max(1, Number(c.credits) || 1), { preset: PRESETS[label] });
   if (def) S.expanded[def.id] = false;
   return def;
 }
@@ -1687,6 +1813,89 @@ function setPath(obj, dotted, val){
   cur[parts[parts.length - 1]] = val;
 }
 
+/**
+ * 「学分要求」那一栏：每个类别一行（需要 / 已取得 / 还需），带限定条件的类别再跟一行。
+ *
+ * 为什么放在高级设置里而不是只留卡片上的步进器：卡片上只能 ±1，而且看不到"学校到底要几分"。
+ * 这里能直接填数字，也能把"我已经修过 1 分了"一次说清，程序只补差额。
+ */
+function renderCreditRows(){
+  const box = $('#creditRows');
+  if (!box) return;
+  if (!BUCKETS.length) {
+    box.innerHTML = '<div class="credit-empty">还没有类别 —— 回第 2 步点选一门课，会自动建类别并带上学校要求。</div>';
+    return;
+  }
+
+  box.innerHTML = BUCKETS.map(b => {
+    const earned = Math.max(0, Number(S.earned[b.id]) || 0);
+    const needTotal = Math.max(0, Number(b.need) || 0);
+    const left = Math.max(0, needTotal - earned);
+    const rows = [`<div class="crow" data-b="${b.id}" style="--c:${b.color}">
+      <span class="nm"><span class="cd"></span><span class="t" title="${esc(b.label)}">${esc(b.label)}</span></span>
+      <label>需要<input type="number" min="0" max="30" step="1" data-f="need" data-bid="${b.id}" value="${needTotal}"></label>
+      <label>已取得<input type="number" min="0" max="30" step="1" data-f="earned" data-bid="${b.id}" value="${Math.min(earned, 30)}"></label>
+      <span class="left" data-left="${b.id}">${left ? `还需 <b>${left}</b>` : '已修满'}</span>
+    </div>`];
+
+    if (b.sub) {
+      const subEarned = Math.max(0, Number(b.sub.earned) || 0);
+      const subTotal = Math.max(0, Number(b.sub.need) || 0);
+      const subLeft = Math.max(0, subTotal - subEarned);
+      rows.push(`<div class="crow sub" data-b="${b.id}" style="--c:${b.color}">
+        <div class="subrule">限定：其中至少 <input type="number" min="0" max="30" step="1" data-f="subneed" data-bid="${b.id}" value="${subTotal}"> 学分必须来自<b>「${esc(b.sub.label)}」</b></div>
+        <div class="subnums">
+          <label>这部分已取得<input type="number" min="0" max="30" step="1" data-f="subearned" data-bid="${b.id}" value="${Math.min(subEarned, 30)}"></label>
+          <span class="left" data-left="${b.id}-sub">${subLeft ? `还需 <b>${subLeft}</b>` : '已满足'}</span>
+        </div>
+      </div>`);
+    }
+    return rows.join('');
+  }).join('');
+}
+
+/** 只更新"还需"那两个数字，不重画整块 —— 重画会让正在输入的框失去焦点。 */
+function updateCreditLeft(bid){
+  const b = BK.get(bid);
+  if (!b) return;
+  const left = Math.max(0, (Number(b.need) || 0) - (S.earned[bid] || 0));
+  const el = document.querySelector(`#creditRows [data-left="${bid}"]`);
+  if (el) el.innerHTML = left ? `还需 <b>${left}</b>` : '已修满';
+  if (b.sub) {
+    const subLeft = Math.max(0, (Number(b.sub.need) || 0) - (b.sub.earned || 0));
+    const sel = document.querySelector(`#creditRows [data-left="${bid}-sub"]`);
+    if (sel) sel.innerHTML = subLeft ? `还需 <b>${subLeft}</b>` : '已满足';
+  }
+}
+
+$('#creditRows').addEventListener('input', e => {
+  const el = e.target;
+  const bid = el.dataset.bid;
+  const field = el.dataset.f;
+  const b = BK.get(bid);
+  if (!b || !field) return;
+  // 夹在 0~30：手输 "999" 或清空都不该把模型搞成 NaN（NaN 会让差额显示成"还需 NaN"）
+  const n = Math.max(0, Math.min(30, Math.floor(Number(el.value) || 0)));
+  if (field === 'need') b.need = n;
+  else if (field === 'earned') S.earned[bid] = n;
+  else if (field === 'subneed' && b.sub) b.sub.need = n;
+  else if (field === 'subearned' && b.sub) b.sub.earned = n;
+  else return;
+  updateCreditLeft(bid);
+});
+
+$('#btnCreditReset').onclick = () => {
+  for (const b of BUCKETS) {
+    const p = PRESETS[b.label];
+    if (!p) continue;
+    b.need = p.need;
+    if (b.sub) b.sub.need = p.sub?.need ?? b.sub.need;
+  }
+  // 只重置"需要多少"，不动"已取得" —— 那是用户自己的进度，不该被一键清掉
+  renderCreditRows();
+  toast('已恢复默认学分要求（已修学分保留）');
+};
+
 function loadAdvanced(){
   const cfg = S.config ?? {};
   document.querySelectorAll('#advMask [data-key]').forEach(el => {
@@ -1700,6 +1909,7 @@ function loadAdvanced(){
   // 类别上限若配置里没有，用界面上限兜底
   const mb = $('#advMask [data-key="ui.maxBuckets"]');
   if (mb && !mb.value) mb.value = String(S.maxBuckets);
+  renderCreditRows();
   renderCatInfo();
   $('#precheckRes').innerHTML = '';
 }
@@ -1719,11 +1929,38 @@ function collectAdvanced(){
   return cfg;
 }
 
+/**
+ * 打开抽屉时给"学分要求"拍个快照。改到一半点取消应该原样退回 ——
+ * 这些输入直接改的是类别模型，不拍快照的话点取消也会静默生效。
+ */
+let advSnapshot = null;
+
 function openAdv(){
+  advSnapshot = BUCKETS.map(b => ({
+    id: b.id,
+    need: b.need,
+    earned: Math.max(0, Number(S.earned[b.id]) || 0),
+    sub: b.sub ? { ...b.sub } : null,
+  }));
   loadAdvanced();
   $('#advMask').classList.add('show');
 }
-function closeAdv(){ $('#advMask').classList.remove('show'); }
+
+/** @param {boolean} revert 取消时回滚到打开前的快照；保存时传 false。 */
+function closeAdv(revert = true){
+  if (revert && advSnapshot) {
+    for (const snap of advSnapshot) {
+      const b = BK.get(snap.id);
+      if (!b) continue;
+      b.need = snap.need;
+      S.earned[snap.id] = snap.earned;
+      if (snap.sub && b.sub) b.sub = { ...snap.sub };
+    }
+    render();
+  }
+  advSnapshot = null;
+  $('#advMask').classList.remove('show');
+}
 
 $('#btnAdv').onclick = openAdv;
 $('#advClose').onclick = closeAdv;
@@ -1745,7 +1982,7 @@ $('#advSave').onclick = async () => {
   S.maxBuckets = mb;
   try {
     await saveConfig();
-    closeAdv();
+    closeAdv(false);
     render();
     toast(`已保存设置${before !== mb ? `（类别上限 ${mb}）` : ''}`);
   } catch (e) {
@@ -1815,10 +2052,22 @@ function renderPrecheck(d){
       </div>
       <div class="h">${esc(t.hint || '')}</div>
     </div>`).join('');
+  // 限定条件单独报一次：总学分够、限定单元一门能抢的都没有，等于这个类别白抢
+  const subLines = [];
+  for (const b of d.buckets ?? []) {
+    for (const g of b.groups ?? []) {
+      const bad = g.total === 0 || g.available === 0;
+      subLines.push(
+        `<div class="${bad ? 'subwarn' : ''}">${esc(b.label)} · 限定「${esc(g.label)}」：` +
+          `${g.available}/${g.total} 门能抢${bad ? ' —— 这个限定现在补不上，建议换课' : ''}</div>`,
+      );
+    }
+  }
   box.innerHTML = `<div class="v">${esc(d.verdict || '')}</div>
     <div class="h" style="padding-left:0;margin-bottom:4px">
       列表 ${d.listCount} 门｜能抢 ${d.summary.available}｜满员 ${d.summary.full}｜本学期没开 ${d.summary.missing}
     </div>
+    ${subLines.length ? `<div class="h sublines">${subLines.join('')}</div>` : ''}
     ${rows}`;
 }
 
@@ -1839,9 +2088,11 @@ function renderBuckets(){
 
   $('#buckets').innerHTML = BUCKETS.map(b => {
     const chain = chainOf(b.id);
-    const need = stateNeed(b.id);
+    const gap = bucketGap(b);
+    const need = gap.need;
     const planned = chainCredits(b.id);
-    const done = need === 0 || planned >= need;
+    // "已修满"要连限定条件一起看：总学分够了但限定那 1 学分没着落，学校不认
+    const done = !gap.needsWork;
     const shortfall = Math.max(0, need - planned);
     const expanded = Boolean(S.expanded[b.id]);
     const visible = expanded ? chain : chain.slice(0, COLLAPSE_AT);
@@ -1864,11 +2115,16 @@ function renderBuckets(){
       <div class="bkt-head">
         <span class="dot"></span>
         <h3>${esc(b.label)}</h3>
-        <span class="st${need === 0 ? ' ok' : ''}">${need === 0 ? '已修满' : done ? `需 ${need} 分` : `还差 ${shortfall} 分`}</span>
+        <span class="st${done ? ' ok' : ''}">${done
+          ? '已修满'
+          : need === 0
+            ? `限定还差 ${gap.subShort} 分`
+            : planned >= need ? `需 ${need} 分` : `还差 ${shortfall} 分`}</span>
         <button class="delbkt" data-delbkt="${b.id}" title="删除这个类别"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke-linecap="round"/></svg></button>
       </div>
       <div class="bkt-meta">
         <span class="rule" title="${esc(b.rule)}">${esc(b.rule)}</span>
+        ${b.sub ? `<span class="subchip" title="限定条件：至少 ${b.sub.need} 学分必须来自 ${esc(b.sub.label)}">限定 ${Math.min(Number(b.sub.earned) || 0, Number(b.sub.need) || 0)}/${b.sub.need}</span>` : ''}
         ${hidden > 0 ? `<button class="more" data-more="${b.id}">还有 ${hidden} 门</button>` : ''}
         ${expanded && chain.length > COLLAPSE_AT ? `<button class="more" data-more="${b.id}">收起</button>` : ''}
         <div class="stepper" title="这类你已经修过的学分 —— 程序只补差额">
@@ -2056,11 +2312,15 @@ function buildConfig(){
   const buckets = [];
   for (const b of BUCKETS) {
     const ids = [];
+    const subIds = [];
     chainOf(b.id).forEach((code, i) => {
       const c = S.byCode.get(code);
       if (!c) return;
       const id = `${b.id}${i + 1}`;
       ids.push(id);
+      // 限定组的候选 = 这条候选链里属于限定单元的那几门。
+      // 由界面算而不是引擎算：引擎不认识课程库，只认 id。
+      if (b.sub && b.sub.accepts(c)) subIds.push(id);
       targets.push({
         id,
         courseCode: { exact: [c.code] },
@@ -2071,12 +2331,35 @@ function buildConfig(){
         _category: b.id,
       });
     });
-    buckets.push({
+    const earned = Math.max(0, Number(S.earned[b.id]) || 0);
+    const total = Math.max(0, Number(b.need) || 0);
+    const bucket = {
       id: b.id,
       label: b.label,
-      needCredits: Math.max(0, b.need - (S.earned[b.id] || 0)),
+      // 引擎只认这个差额：总需 2、已修 1 → 还要抢 1 学分
+      needCredits: Math.max(0, total - earned),
+      // 后两个纯展示用，用于重新打开界面时还原"需 2 / 已修 1"
+      totalCredits: total,
+      earnedCredits: earned,
       targets: ids,
-    });
+    };
+    if (b.sub) {
+      const subEarned = Math.max(0, Number(b.sub.earned) || 0);
+      const subTotal = Math.max(0, Number(b.sub.need) || 0);
+      const subNeed = Math.max(0, subTotal - subEarned);
+      // 即使限定已修满（subNeed 0）也要写进去：否则重开界面时「限定已取得」会丢，
+      // 一条已经满足的规则被重新当成"还得再修 1 学分"。
+      // 引擎会过滤掉 needCredits 为 0 的组，不影响调度。
+      bucket.groups = [{
+        id: b.sub.id,
+        label: b.sub.label,
+        needCredits: subNeed,
+        totalCredits: subTotal,
+        earnedCredits: subEarned,
+        targets: subIds,
+      }];
+    }
+    buckets.push(bucket);
   }
 
   const base = S.config ?? {};
@@ -2141,14 +2424,16 @@ $('#btnNext').onclick = async () => {
 // ── 步骤 3 ──────────────────────────────────────────────────
 function renderSummary(){
   $('#summary').innerHTML = BUCKETS.map(b => {
-    const need = stateNeed(b.id);
+    const { need, subShort, needsWork } = bucketGap(b);
     const n = chainOf(b.id).length;
-    const planned = chainCredits(b.id);
-    const done = need === 0;
+    const earned = Math.max(0, Number(S.earned[b.id]) || 0);
+    const showNeed = need || subShort;
     return `<div class="sum" style="--c:${b.color}">
       <div class="t"><span class="d"></span>${b.label}</div>
-      <div class="v">${done ? '—' : `需 ${need}`}<small>学分</small></div>
-      <div class="s">${done ? '已修满，跳过' : `${n} 门候选可选`}</div>
+      <div class="v">${needsWork ? `需 ${showNeed}` : '—'}<small>学分</small></div>
+      <div class="s">${needsWork
+        ? `${n} 门候选${subShort ? ` · 限定还差 ${subShort}` : ''}`
+        : (earned ? `已修 ${earned}，跳过` : '已修满，跳过')}</div>
     </div>`;
   }).join('');
 
@@ -2157,12 +2442,12 @@ function renderSummary(){
     ? `到点自动开始，提前约 2 分钟进入预热`
     : '未设定 —— 点了按钮立刻开始';
 
-  const ready = BUCKETS.length > 0 && BUCKETS.every(b => stateNeed(b.id) === 0 || chainOf(b.id).length > 0);
+  const ready = BUCKETS.length > 0 && BUCKETS.every(b => !bucketGap(b).needsWork || chainOf(b.id).length > 0);
   $('#btnDry').disabled = !ready;
   $('#btnLive').disabled = !ready;
 
   // 按钮被禁用时必须说清"为什么"。否则用户只看到两个灰按钮，不知道回去补哪一类。
-  const missing = BUCKETS.filter(b => stateNeed(b.id) > 0 && chainOf(b.id).length === 0);
+  const missing = BUCKETS.filter(b => bucketGap(b).needsWork && chainOf(b.id).length === 0);
   const block = $('#runBlock');
   if (block) {
     const lines = [];
@@ -2199,7 +2484,7 @@ $('#startAt').addEventListener('change', () => { saveConfigSilent(); renderSumma
 async function startRun(live){
   // 与 goStep 的拦截保持同一口径：没有类别 / 有类别但没候选，都不能发请求
   if (!BUCKETS.length) return toast('至少需要 1 个类别 —— 回第 2 步点选一门课');
-  const ready = BUCKETS.every(b => stateNeed(b.id) === 0 || chainOf(b.id).length > 0);
+  const ready = BUCKETS.every(b => !bucketGap(b).needsWork || chainOf(b.id).length > 0);
   if (!ready) return toast('还有类别没有候选课程');
   if (live) {
     const ok = confirm(

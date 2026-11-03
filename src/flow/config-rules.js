@@ -42,6 +42,66 @@ function hasLocator(t) {
 }
 
 /**
+ * 桶内限定条件（groups）的校验：`艺术审美 2 学分，其中至少 1 学分须在美学和艺术史论类或艺术鉴赏和评论类`。
+ *
+ * 这几条错法都会让程序"看起来在跑、实际永远达不到"：
+ *   - 限定组没有候选 → 那个条件永远满足不了，桶永远退不了役；
+ *   - 限定组的候选不属于这个桶 → 引擎只会从桶的候选里挑，写了也没用；
+ *   - 限定学分比桶剩下的还多 → 数学上不可能满足。
+ */
+function checkBucketGroups(b, where, need, errors) {
+  if (b.groups === undefined) return;
+  if (!Array.isArray(b.groups)) {
+    errors.push(`${where} —— groups 必须是数组`);
+    return;
+  }
+  const label = b.label ?? b.id ?? '未命名';
+  const bucketTargets = Array.isArray(b.targets) ? b.targets : null;
+  const seen = new Set();
+
+  b.groups.forEach((g, gi) => {
+    const gwhere = `${where}.groups[${gi}]`;
+    if (!g || typeof g !== 'object') {
+      errors.push(`${gwhere} —— 不是对象`);
+      return;
+    }
+    const gid = String(g.id ?? '').trim();
+    if (!gid) errors.push(`${gwhere} —— 缺少 id`);
+    else if (seen.has(gid)) errors.push(`${gwhere} —— id 重复：${gid}`);
+    else seen.add(gid);
+
+    const gname = g.label ?? (gid || '未命名');
+    const gneed = Number(g.needCredits);
+    if (!Number.isFinite(gneed) || gneed < 0) {
+      errors.push(`${gwhere}（${gname}）—— needCredits 必须是非负数字（现在 ${g.needCredits}）`);
+      return;
+    }
+    // 0 = 这部分已经修满。保留它是为了重开界面时能还原「限定已取得」，
+    // 引擎会直接过滤掉，不需要候选，也不算错。
+    if (gneed === 0) return;
+    if (Number.isFinite(need) && need > 0 && gneed > need) {
+      errors.push(
+        `${gwhere}（${gname}）—— 限定要 ${gneed} 学分，但类别「${label}」总共只要 ${need} 学分，永远满足不了`,
+      );
+    }
+
+    if (!Array.isArray(g.targets) || !g.targets.length) {
+      errors.push(
+        `${gwhere}（${gname}）—— 限定条件里没有候选课程，永远满足不了` +
+          `（去第 2 步挑一门${g.label ? `「${g.label}」的` : ''}课，或把这部分学分填进「已取得」）`,
+      );
+      return;
+    }
+    if (!bucketTargets) return;
+    for (const tid of g.targets) {
+      if (!bucketTargets.includes(tid)) {
+        errors.push(`${gwhere} 引用了不属于类别「${label}」的目标：${tid}`);
+      }
+    }
+  });
+}
+
+/**
  * 校验整个配置。
  * @returns {{errors:string[], warnings:string[], maxBuckets:number}}
  */
@@ -104,6 +164,8 @@ export function validateConfig(config) {
 
     const seen = new Set();
     const usedBy = new Map();
+    /** 是否还有任何"要抢的学分"：全为 0 时开跑只会空转，必须拦。 */
+    let needsWork = false;
     for (const [i, b] of buckets.entries()) {
       const where = `buckets[${i}]`;
       if (!b || typeof b !== 'object') {
@@ -116,9 +178,46 @@ export function validateConfig(config) {
       else seen.add(id);
 
       const need = Number(b.needCredits);
-      if (!(need > 0)) {
-        errors.push(`${where}（${b.label ?? (id || '未命名')}）—— needCredits 必须是正数（现在 ${b.needCredits}）`);
+      // needCredits = 0 是合法状态："这个类别已经修满了"（界面里把已取得填够就会出现）。
+      // 不能报错 —— 否则"某一类已经修完"会把人挡在开抢之外。只提醒它会被跳过。
+      const pendingSub = Array.isArray(b.groups)
+        && b.groups.some((g) => Number(g?.needCredits) > 0);
+      if (!Number.isFinite(need) || need < 0) {
+        errors.push(
+          `${where}（${b.label ?? (id || '未命名')}）—— needCredits 必须是非负数字（现在 ${b.needCredits}）`,
+        );
+      } else if (need === 0 && !pendingSub) {
+        warnings.push(
+          `${where}（${b.label ?? (id || '未命名')}）—— 已修满（needCredits 0），运行时整个跳过`,
+        );
+      } else {
+        needsWork = true;
       }
+
+      // totalCredits / earnedCredits 是给人看的（学校要求多少、你已经修了多少），
+      // 引擎只认 needCredits（差额）。两个数字对不上不影响运行，但界面上会自相矛盾，
+      // 所以给个提醒而不是错误 —— 手写配置的人可能只写了 needCredits。
+      const totalRaw = Number(b.totalCredits);
+      const earnedRaw = Number(b.earnedCredits);
+      if (b.totalCredits !== undefined && (!Number.isFinite(totalRaw) || totalRaw < 0)) {
+        warnings.push(`${where} —— totalCredits 不是有效学分，界面按 needCredits 显示`);
+      } else if (b.totalCredits !== undefined && Number.isFinite(earnedRaw)) {
+        const expect = Math.max(0, totalRaw - earnedRaw);
+        if (Math.abs(expect - need) > 1e-6) {
+          warnings.push(
+            `${where}（${b.label ?? id}）—— totalCredits ${totalRaw} − earnedCredits ${earnedRaw} = ${expect}，` +
+              `与 needCredits ${b.needCredits} 不一致；引擎按 needCredits 执行`,
+          );
+        }
+      }
+      if (b.earnedCredits !== undefined && (!Number.isFinite(earnedRaw) || earnedRaw < 0)) {
+        warnings.push(`${where} —— earnedCredits 不是有效学分，按 0 处理`);
+      }
+
+      // 限定的"上限"应该按学校要求的总学分算，而不是按剩下的差额算：
+      // 已修 1 分、还要 1 分时，限定仍可能是「至少 1 学分」。
+      checkBucketGroups(b, where, Number.isFinite(totalRaw) ? totalRaw : need, errors);
+
       if (!Array.isArray(b.targets) || !b.targets.length) {
         errors.push(`${where}（${b.label ?? (id || '未命名')}）—— 至少要有一个候选课程`);
         continue;
@@ -132,6 +231,10 @@ export function validateConfig(config) {
           errors.push(`目标 ${tid} 同时属于两个类别（${usedBy.get(tid)} 与 ${id}）—— 分桶模式下会被抢两次`);
         } else usedBy.set(tid, id);
       }
+    }
+
+    if (buckets.length && !needsWork) {
+      errors.push('buckets —— 所有类别都已修满（needCredits 全为 0），没有要抢的学分');
     }
 
     const orphans = [...targetIds].filter((id) => !usedBy.has(id));

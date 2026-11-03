@@ -121,11 +121,115 @@ test('目标没归入任何类别：只是提醒（不是错误）', () => {
   assert.ok(r.warnings.some((w) => w.includes('孤儿')));
 });
 
-test('needCredits 不是正数：必须报错', () => {
+test('某一类已修满（needCredits 0）不该挡住建别的类开抢', () => {
+  // 界面里把「已取得」填够，就会产出 needCredits 0 的桶。这是正常状态，不是错误。
   const r = validateConfig(baseCfg({
-    buckets: [{ id: 'a', needCredits: 0, targets: ['a1'] }],
+    buckets: [
+      { id: 'a', label: '绿色文明', needCredits: 0, totalCredits: 2, earnedCredits: 2, targets: ['a1'] },
+      { id: 'b', label: '创新创业', needCredits: 2, totalCredits: 2, earnedCredits: 0, targets: ['a2'] },
+    ],
   }));
-  assert.ok(r.errors.some((e) => e.includes('needCredits')));
+  assert.deepEqual(r.errors, []);
+  assert.ok(r.warnings.some((w) => w.includes('已修满')), '已修满的类别仍要提醒会被跳过');
+});
+
+test('所有类别都已修满：必须报错（开跑只会空转）', () => {
+  const r = validateConfig(baseCfg({
+    buckets: [{ id: 'a', needCredits: 0, totalCredits: 2, earnedCredits: 2, targets: ['a1'] }],
+  }));
+  assert.ok(r.errors.some((e) => e.includes('没有要抢的学分')), r.errors.join(' | '));
+});
+
+test('合法限定条件：零错误', () => {
+  const r = validateConfig(baseCfg({
+    buckets: [{
+      id: 'art',
+      label: '艺术审美',
+      needCredits: 2,
+      totalCredits: 2,
+      earnedCredits: 0,
+      targets: ['a1', 'a2'],
+      groups: [{ id: 'sub', label: '美学/鉴赏', needCredits: 1, targets: ['a1'] }],
+    }],
+  }));
+  assert.deepEqual(r.errors, []);
+});
+
+test('限定条件里没有候选：必须报错', () => {
+  const r = validateConfig(baseCfg({
+    buckets: [{
+      id: 'art',
+      label: '艺术审美',
+      needCredits: 2,
+      targets: ['a1', 'a2'],
+      groups: [{ id: 'sub', label: '美学/鉴赏', needCredits: 1, targets: [] }],
+    }],
+  }));
+  assert.ok(
+    r.errors.some((e) => e.includes('限定条件里没有候选课程')),
+    `限定组没候选会永远满足不了，必须在开抢前拦住：${r.errors.join(' | ')}`,
+  );
+});
+
+test('限定条件引用了不属于该类别的目标：必须报错', () => {
+  const r = validateConfig(baseCfg({
+    buckets: [{
+      id: 'art',
+      label: '艺术审美',
+      needCredits: 2,
+      targets: ['a1'],
+      groups: [{ id: 'sub', label: '美学/鉴赏', needCredits: 1, targets: ['b1'] }],
+    }],
+  }));
+  assert.ok(
+    r.errors.some((e) => e.includes('不属于类别')),
+    `引擎只从桶的候选里挑，限定组写别的桶的目标等于没写：${r.errors.join(' | ')}`,
+  );
+});
+
+test('限定学分超过类别总学分：必须报错', () => {
+  const r = validateConfig(baseCfg({
+    buckets: [{
+      id: 'art',
+      label: '艺术审美',
+      needCredits: 2,
+      totalCredits: 2,
+      targets: ['a1', 'a2'],
+      groups: [{ id: 'sub', label: '美学/鉴赏', needCredits: 3, targets: ['a1'] }],
+    }],
+  }));
+  assert.ok(r.errors.some((e) => e.includes('总共只要 2 学分')), r.errors.join(' | '));
+});
+
+test('限定部分已修满（needCredits 0）：保留但不报错，也不需要候选', () => {
+  // 界面为了"重开还能看到限定已取得"，即使已修满也会把 groups 写进配置。
+  // 这时它不参与调度，没有候选也不算错 —— 否则"已经满足的规则"会挡住开抢。
+  const r = validateConfig(baseCfg({
+    buckets: [
+      {
+        id: 'art',
+        label: '艺术审美',
+        needCredits: 1,
+        totalCredits: 2,
+        earnedCredits: 1,
+        targets: ['a1'],
+        groups: [{ id: 'sub', label: '美学/鉴赏', needCredits: 0, totalCredits: 1, earnedCredits: 1, targets: [] }],
+      },
+      { id: 'b', label: '乙', needCredits: 1, targets: ['a2'] },
+    ],
+  }));
+  assert.deepEqual(r.errors, []);
+});
+
+test('totalCredits 与 needCredits 对不上：只警告，不拦', () => {
+  const r = validateConfig(baseCfg({
+    buckets: [
+      { id: 'a', label: '甲', needCredits: 2, totalCredits: 4, earnedCredits: 0, targets: ['a1'] },
+      { id: 'b', label: '乙', needCredits: 1, targets: ['a2'] },
+    ],
+  }));
+  assert.deepEqual(r.errors, []);
+  assert.ok(r.warnings.some((w) => w.includes('不一致')), r.warnings.join(' | '));
 });
 
 test('类别里没有候选：必须报错', () => {

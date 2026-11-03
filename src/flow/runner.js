@@ -19,6 +19,11 @@ function shortMessage(err, max = 160) {
   return msg.length > max ? `${msg.slice(0, max)}…` : msg;
 }
 
+/** 目标列表归一成 id 数组：配置里写 id 或对象都接受。 */
+function targetIds(list) {
+  return (list ?? []).map((t) => (typeof t === 'string' ? t : t?.id)).filter(Boolean);
+}
+
 export class Runner {
   /**
    * @param {object} opts
@@ -75,10 +80,28 @@ export class Runner {
     this.buckets = (opts.buckets ?? []).map((b) => ({
       ...b,
       needCredits: Number(b.needCredits ?? 1),
-      targets: (b.targets ?? []).map((t) => (typeof t === 'string' ? t : t?.id)).filter(Boolean),
+      targets: targetIds(b.targets),
+      /**
+       * 子条件（groups）：这个类别里"有一部分学分必须从指定课程里修"。
+       * 例：艺术审美 2 学分，其中至少 1 学分须在美学和艺术史论类或艺术鉴赏和评论类。
+       *
+       * 为什么不能只靠候选顺序：总学分先靠"好抢的"凑满之后，桶就被判定达标退役了，
+       * 限定那 1 学分再也没人管 —— 学校审核时才知道这个类别不算数。
+       */
+      groups: (b.groups ?? [])
+        .map((g) => ({
+          ...g,
+          id: String(g.id ?? 'sub'),
+          needCredits: Number(g.needCredits ?? 0),
+          targets: targetIds(g.targets),
+        }))
+        // 额度为 0 或没有候选的组不参与调度（额度为 0 = 已经修满，不必再抢）
+        .filter((g) => g.needCredits > 0 && g.targets.length),
     }));
     /** 桶 id → 已抢到并确认的学分 */
     this.bucketCredits = new Map();
+    /** `桶id::组id` → 该组已抢到的学分 */
+    this.groupCredits = new Map();
   }
 
   stop() {
@@ -136,6 +159,13 @@ export class Runner {
           names.push(t._name ?? t.courseName?.include?.join('/') ?? id);
         }
         this.logger?.info(`  · ${label}：${names.join('、') || '（无候选）'}`);
+        // 限定条件必须在开跑前就说清楚：它是"总学分够了也不算完"的那部分，
+        // 事后才发现等于白抢一个学期。
+        for (const g of b.groups ?? []) {
+          this.logger?.info(
+            `    ↳ 限定：至少 ${g.needCredits} 学分来自「${g.label ?? g.id}」（候选 ${g.targets.length} 门）`,
+          );
+        }
         if (missing.length) {
           this.logger?.warn(`  · ${label}：以下目标 id 在 targets 里不存在 —— ${missing.join('、')}`);
         }
@@ -385,8 +415,41 @@ export class Runner {
 
   /** 该桶里还有哪些目标待处理。 */
   bucketActiveTargets(bucket) {
-    const ids = new Set((bucket.targets ?? []).map((t) => (typeof t === 'string' ? t : t?.id)));
+    const ids = new Set(targetIds(bucket.targets));
     return this.store.activeTargets().filter((t) => ids.has(t.id));
+  }
+
+  groupKey(bucketId, groupId) {
+    return `${bucketId}::${groupId}`;
+  }
+
+  groupGot(bucketId, groupId) {
+    return this.groupCredits.get(this.groupKey(bucketId, groupId)) ?? 0;
+  }
+
+  /** 还没满足的限定条件（学分不够的那些）。 */
+  pendingGroups(bucket) {
+    return (bucket.groups ?? []).filter((g) => this.groupGot(bucket.id, g.id) < g.needCredits);
+  }
+
+  /**
+   * 桶是否真的完成。**光看总学分不够** —— 艺术审美 2 学分靠两门"艺术体验和实践类"凑满，
+   * 学分是够的，但"至少 1 学分在美学和艺术史论类或艺术鉴赏和评论类"没满足，
+   * 学校审核不会认。所以总学分与每个子条件都得过。
+   */
+  bucketSatisfied(bucket, got = this.bucketCredits.get(bucket.id) ?? 0) {
+    if (got < bucket.needCredits) return false;
+    return (bucket.groups ?? []).every((g) => this.groupGot(bucket.id, g.id) >= g.needCredits);
+  }
+
+  /** 进度文案里补一段限定条件，避免出现"2/2 学分了却还在跑"这种看不懂的日志。 */
+  groupHint(bucket) {
+    const pending = this.pendingGroups(bucket);
+    if (!pending.length) return '';
+    const parts = pending.map(
+      (g) => `限定 ${Math.min(this.groupGot(bucket.id, g.id), g.needCredits)}/${g.needCredits}`,
+    );
+    return `（${parts.join('、')}）`;
   }
 
   /** 还没修满学分、且仍有候选可打的桶。 */
@@ -394,8 +457,31 @@ export class Runner {
     const open = [];
     for (const bucket of this.buckets) {
       const got = this.bucketCredits.get(bucket.id) ?? 0;
-      if (got >= bucket.needCredits) continue;
-      const targets = this.bucketActiveTargets(bucket);
+      if (this.bucketSatisfied(bucket, got)) continue;
+
+      let targets = this.bucketActiveTargets(bucket);
+
+      // 限定条件没满足时**只在限定候选里挑**。否则"先抢好抢的"会把总学分凑满，
+      // 限定那 1 学分永远轮不到 —— 这正是这个功能要防的失败。
+      const pending = this.pendingGroups(bucket);
+      if (pending.length) {
+        const ids = new Set(pending.flatMap((g) => targetIds(g.targets)));
+        const narrowed = targets.filter((t) => ids.has(t.id));
+        if (narrowed.length) {
+          targets = narrowed;
+        } else if (targets.length) {
+          // 限定单元的候选全用完了：不能因此把整个类别卡死在这里（别的课还能补总学分），
+          // 但必须说清"这个限定可能修不满"，否则用户以为万事大吉。
+          this.logThrottled(
+            `bucket-group-exhausted:${bucket.id}`,
+            `类别「${bucket.label ?? bucket.id}」的限定条件（${pending
+              .map((g) => `${g.label ?? g.id} ${g.needCredits} 学分`)
+              .join('、')}）已无可用候选 —— 先继续补总学分，但**这个限定可能修不满**，需人工确认`,
+            'warn',
+          );
+        }
+      }
+
       if (!targets.length) {
         // 每轮都会走到这里，不节流就是每 2.5 秒刷一条，把真正的进展淹掉
         this.logThrottled(
@@ -412,7 +498,7 @@ export class Runner {
 
   allBucketsSatisfied() {
     if (!this.buckets.length) return false;
-    return this.buckets.every((b) => (this.bucketCredits.get(b.id) ?? 0) >= b.needCredits);
+    return this.buckets.every((b) => this.bucketSatisfied(b));
   }
 
   /**
@@ -441,7 +527,7 @@ export class Runner {
       const got = this.bucketCredits.get(bucket.id) ?? 0;
 
       if (r.status === 'no-match') {
-        progress.push(`${tag} ${got}/${bucket.needCredits} ${r.absent ? '没排课' : '无候选'}`);
+        progress.push(`${tag} ${got}/${bucket.needCredits}${this.groupHint(bucket)} ${r.absent ? '没排课' : '无候选'}`);
         if (r.absent) {
           // "列表里根本没有这些课"是最容易被误解成"再等等就有了"的状态。
           // 必须说清：这不是满员、不是接口坏了，是这门课本学期没开。
@@ -456,7 +542,7 @@ export class Runner {
       }
       if (r.status === 'found-full') {
         this.noteFull(r.match.target, this.now());
-        progress.push(`${tag} ${got}/${bucket.needCredits} 满员`);
+        progress.push(`${tag} ${got}/${bucket.needCredits}${this.groupHint(bucket)} 满员`);
         this.logThrottled(
           `full:${bucket.id}`,
           `「${tag}」候选「${describe(r.match)}」已满员（已修 ${got}/${bucket.needCredits} 学分），等退课…`,
@@ -464,7 +550,7 @@ export class Runner {
         continue;
       }
 
-      progress.push(`${tag} ${got}/${bucket.needCredits} 命中`);
+      progress.push(`${tag} ${got}/${bucket.needCredits}${this.groupHint(bucket)} 命中`);
 
       await this.limiter.acquire(this.sleep);
 
@@ -495,9 +581,17 @@ export class Runner {
         }
         const total = (this.bucketCredits.get(bucket.id) ?? 0) + gained;
         this.bucketCredits.set(bucket.id, total);
-        const done = total >= bucket.needCredits;
+        // 同一门课可能同时属于多个限定组（配置写重了），各自累加即可 —— 规则由 config-rules 兜
+        for (const g of bucket.groups ?? []) {
+          if (!targetIds(g.targets).includes(r.match.target.id)) continue;
+          const key = this.groupKey(bucket.id, g.id);
+          this.groupCredits.set(key, (this.groupCredits.get(key) ?? 0) + gained);
+        }
+        const done = this.bucketSatisfied(bucket, total);
+        const groupNote = this.groupHint(bucket);
         this.logger?.info(
           `「${tag}」进度 ${Math.min(total, bucket.needCredits)}/${bucket.needCredits} 学分` +
+            (groupNote ? `，${groupNote.slice(1, -1)}` : '') +
             (done ? ' —— 该类别已达标 ✅' : '，继续'),
         );
         if (done) this.retireBucket(bucket);
