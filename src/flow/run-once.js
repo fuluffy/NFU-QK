@@ -6,7 +6,7 @@
  * 抽出来之后只有一处真相，日志文案保持原样。
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { HttpClient, applyIpv4First } from '../net/http-client.js';
@@ -126,6 +126,50 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
     backoff: net.backoff,
     maxAttemptsPerTarget: config.strategy?.maxAttemptsPerTarget ?? 0,
   });
+  // 会话失效时的恢复策略：从会话文件热加载新 Cookie，而不是"5 次就退出"。
+  //
+  // 为什么必须这样：验证码只有人能看，所以重新登录只能发生在界面里；
+  // 而抢课进程要一直挂在后台等学校服务器缓过来。进程一重启，轮询进度、
+  // 已提交记录、限流窗口全丢，等于从头再来。热加载让"人登录"和"机器蹲守"解耦。
+  let lastSessionStamp = 0;
+  try {
+    lastSessionStamp = (await stat(sessionFile)).mtimeMs;
+  } catch {
+    /* 没有会话文件：后面每轮都会走"仍是旧的"分支，提示人工登录 */
+  }
+  let sessionWaitTicks = 0;
+
+  const onSessionExpired = async () => {
+    let stamp = 0;
+    try {
+      stamp = (await stat(sessionFile)).mtimeMs;
+    } catch {
+      stamp = 0;
+    }
+    if (!stamp || stamp <= lastSessionStamp) {
+      sessionWaitTicks += 1;
+      if (sessionWaitTicks === 1 || sessionWaitTicks % 15 === 0) {
+        logger.warn(
+          `会话仍是旧的（登录后才会更新）—— 请在界面第 1 步重新登录，本进程继续蹲守，不会退出` +
+            `（第 ${sessionWaitTicks} 次）`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 20_000));
+      return true; // 继续循环，不要停
+    }
+    try {
+      const fresh = await readJsonFile(sessionFile);
+      const n = jar.replaceFrom(fresh);
+      lastSessionStamp = stamp;
+      sessionWaitTicks = 0;
+      logger.info(`已热加载新会话（${n} 个 Cookie），继续抢课`);
+      return true;
+    } catch (e) {
+      logger.warn(`新会话文件读取失败（${e.message}），稍后重试`);
+      return true;
+    }
+  };
+
   const runner = new Runner({
     engine,
     store,
@@ -136,6 +180,7 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
     strategy: config.strategy ?? {},
     backoff: net.backoff,
     buckets: config.buckets ?? [],
+    onSessionExpired,
   });
 
   const onAbort = () => {

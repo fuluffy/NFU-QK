@@ -2,18 +2,25 @@
   "name": "ggxxk-xsxkkc",
   "label": "公选课（通识选修）— xsxkkc 族",
   "school": "NJFU",
-  "_status": "DERIVED —— 端点与字段来自 2025 春前人实测（NJFU-class-graber）及其真实响应样本，未经 2026-11 实测",
+  "_status": "PARTIAL —— 2026-11-03 实测：请求链路与形状已确认（warmup + query 串），但服务端返回 iTotalRecords:0，字段映射仍未验证",
   "_notes": [
+    "2026-11-03 13:10 实测结论（重要，别再踩）：",
+    "  ① 必须先进上下文：GET xklc_list（取 toxk('轮次ID')）→ GET xsxk_index?jx0502zbid=ID → GET comeInGgxxkxk。",
+    "     跳过 xsxk_index 时 comeInGgxxkxk 只有 459B 且 <center> 为空；进去后是 34KB 完整页面。",
+    "  ② 筛选条件必须放 **URL 查询串**，body 只放 DataTables 的 aoData。放错位置会拿到 636B 空 JSP 模板",
+    "     （标题 My JSP 'test.htmlx' starting page），被解析成「0 条」——和「真的没课」完全无法区分。",
+    "     引擎已改为：列表 extract 是 jsonpath 但响应非 JSON 时直接报错，不再沉默。",
+    "  ③ 改对之后拿到合法 JSON：{aaData:[],sEcho:'1',iTotalRecords:0,iTotalDisplayRecords:0,jfViewStr:''}。",
+    "     即「请求被正确理解，但这一轮确实没有课放出来」。",
+    "  ④ 旁证：comeInGgxxkxk 页面里 szjylb（通选课类别）下拉只有「--所有课程--」，skjc/endJc 也只有占位项，",
+    "     xkzy 是空 select。这些选项同样由服务端查库填充 —— 全空说明课程/类别数据尚未导入，不是数据库故障。",
+    "  ⑤ 批次页实测：2026-20267-2学期通识选修课，2026-11-03 12:30 ~ 2026-11-06 17:00。",
+    "",
     "这是 ggxxk 的**第二条路线**，与 profiles/ggxxk.json（zzxk 族）并存，互不替代。",
-    "取舍理由：2026-11-02 实测 zzxk 系列端点全部返回「系统功能暂未开放」，而同一个晚修",
-    "xsxkkc/comeInGgxxkxk 返回 200（空壳）—— 说明模块族更可能是 xsxkkc，但未能完成验证。",
     "字段与请求体依据：github.com/jvav-runtime-environment/NJFU-class-graber（样本学期 2024-2025-2）",
     "详细对照见 docs/学长项目借鉴-2024.md。",
-    "与体育课的相似度：几乎同形。差别只在端点名（xsxkBxxk→xsxkGgxxkxk，bxxkOper→ggxxkxkOper）",
-    "与列表请求体（公选课用 kcxx 关键字 + 13 列 DataTables，无 kcid 查询参数）。",
-    "⚠️ 未验证项：① 是否需要先 GET /jsxsd/xsxk/xsxk_index?jx0502zbid=… 进入选课上下文",
-    "（前人代码注释称「不进入则查不了课程 id」）；② 提交时 kcid 走 query 还是 body（此 profile 两处都发）；",
-    "③ 2026 版是否已把该模块迁走。任何一项不符都会表现为空列表或 404，而不是静默错误。"
+    "⚠️ 仍未验证：matchFields 的字段名（kcmc/kch/skls/jx0404id/pkrs/xkrs）在 2026 秋响应里是否一致",
+    "——因为至今没拿到过一条真实课程记录。放课后第一件事就是核对这一项。"
   ],
   "baseUrl": "https://jwxt.njfu.edu.cn",
   "entryPath": "/jsxsd/xsxk/xklc_list",
@@ -44,28 +51,80 @@
     "bodyMatches": "name=[\"']?username|统一身份认证|用户登录|请输入密码",
     "urlMatches": "authserver/login"
   },
+  "warmup": [
+    {
+      "id": "round",
+      "label": "公选课/取本轮次ID",
+      "_note": "批次页每行一个轮次，操作列是 onclick=\"toxk('轮次ID')\"。抠出 ID 后写进上下文 round.id。",
+      "method": "GET",
+      "path": "/jsxsd/xsxk/xklc_list",
+      "retry": "safe",
+      "headers": {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+      },
+      "captureRegex": "toxk\\('([0-9A-Fa-f]{16,})'\\)",
+      "captureAs": "round.id",
+      "headersReplace": true,
+      "_headers_note": "整组替换：不能带 profile.headers 的 x-requested-with / referer:comeInGgxxkxk，否则服务端把页面请求当 AJAX 甩回首页",
+      "retryOnBounce": true
+    },
+    {
+      "id": "enterIndex",
+      "label": "公选课/进入选课上下文",
+      "_note": "关键一步。不访问它，服务端 session 里没有「当前是哪一轮」；随后所有子页面都是空壳。",
+      "method": "GET",
+      "path": "/jsxsd/xsxk/xsxk_index",
+      "query": {
+        "jx0502zbid": "${round.id}"
+      },
+      "retry": "safe",
+      "headers": {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+      },
+      "headersReplace": true,
+      "_headers_note": "整组替换：不能带 profile.headers 的 x-requested-with / referer:comeInGgxxkxk，否则服务端把页面请求当 AJAX 甩回首页",
+      "retryOnBounce": true
+    },
+    {
+      "id": "enterGgxxk",
+      "label": "公选课/打开公选课页面",
+      "_note": "实测：未进上下文时本页 459B 且 <center> 为空；进上下文后 34KB 完整页面。",
+      "method": "GET",
+      "path": "/jsxsd/xsxkkc/comeInGgxxkxk",
+      "retry": "safe",
+      "headers": {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+      },
+      "headersReplace": true,
+      "_headers_note": "整组替换：不能带 profile.headers 的 x-requested-with / referer:comeInGgxxkxk，否则服务端把页面请求当 AJAX 甩回首页",
+      "retryOnBounce": true
+    }
+  ],
   "steps": [
     {
       "id": "list",
       "label": "ggxxk/可选课程列表（xsxkkc 族）",
       "method": "POST",
       "path": "/jsxsd/xsxkkc/xsxkGgxxkxk",
-      "body": {
+      "_note": "2026-11-03 实测：筛选条件必须走 **URL 查询串**（前端 sAjaxSource = path + param），body 只放 DataTables 的 aoData。把筛选条件塞进 body 会拿到 636B 的空 JSP 模板页，被误读成「0 条」。",
+      "query": {
         "kcxx": "",
         "skls": "",
         "skxq": "",
         "endJc": "",
         "skjc": "",
-        "sfym": false,
-        "sfct": false,
+        "sfym": "false",
+        "sfct": "false",
         "szjylb": "",
-        "sfxx": false,
-        "skfs": "",
+        "sfxx": "false",
+        "skfs": ""
+      },
+      "body": {
         "sEcho": 1,
         "iColumns": 13,
         "sColumns": "",
         "iDisplayStart": 0,
-        "iDisplayLength": 99,
+        "iDisplayLength": 300,
         "mDataProp_0": "kch",
         "mDataProp_1": "kcmc",
         "mDataProp_2": "xf",
@@ -80,9 +139,16 @@
         "mDataProp_11": "tsTskflMc2",
         "mDataProp_12": "czOper"
       },
-      "extract": { "items": "$.aaData[*]" },
+      "extract": {
+        "items": "$.aaData[*]"
+      },
       "filter": {
-        "all": [{ "path": "$.xkzt", "ne": "9" }]
+        "all": [
+          {
+            "path": "$.xkzt",
+            "ne": "9"
+          }
+        ]
       }
     },
     {
@@ -101,8 +167,14 @@
         "kcid": "${item.jx02id}",
         "cfbs": ""
       },
-      "success": { "path": "$.success", "eq": true },
-      "conflictWhen": { "path": "$.message", "matches": "冲突" },
+      "success": {
+        "path": "$.success",
+        "eq": true
+      },
+      "conflictWhen": {
+        "path": "$.message",
+        "matches": "冲突"
+      },
       "messageFrom": "$.message"
     },
     {

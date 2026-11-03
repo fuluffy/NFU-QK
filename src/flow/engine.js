@@ -49,6 +49,22 @@ export function extractItems(json, spec) {
   return all;
 }
 
+/** 按点路径写入对象，用于 warmup 捕获值回填（如 "round.id"）。 */
+function setPath(obj, dotted, value) {
+  const parts = String(dotted).split('.');
+  let cur = obj;
+  for (const p of parts.slice(0, -1)) {
+    if (typeof cur[p] !== 'object' || cur[p] === null) cur[p] = {};
+    cur = cur[p];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+
+/** 从 HTML 里抠标题，只为把错误信息说清楚。 */
+function titleOf(text) {
+  return (/<title>([^<]*)<\/title>/i.exec(text ?? '') ?? [])[1] ?? '';
+}
+
 export class FlowEngine {
   /**
    * @param {object} opts
@@ -69,6 +85,9 @@ export class FlowEngine {
     this.requireAvailable = opts.requireAvailable ?? true;
     this.onItems = opts.onItems ?? null;
     this.stats = { cycles: 0, lists: 0, details: 0, probes: 0, submits: 0, successes: 0, sessionExpired: 0 };
+    /** warmup 捕获到的上下文（如轮次 id），成功后合并进每次步骤的插值上下文。 */
+    this.warmupCtx = {};
+    this.warmupDone = false;
   }
 
   step(id) {
@@ -91,7 +110,54 @@ export class FlowEngine {
    * 因此把 defaults（profile 级默认参数）注入进来，避免每个步骤重复写死课程类别码。
    */
   baseContext(ctx) {
-    return { defaults: this.profile.defaults ?? {}, ...ctx };
+    return { defaults: this.profile.defaults ?? {}, ...this.warmupCtx, ...ctx };
+  }
+
+  /**
+   * 执行 profile.warmup：在第一次列表请求前建立服务端上下文。
+   *
+   * 为什么需要：正方选课是**有状态**的。直接打列表接口，服务端 session 里没有
+   * 「当前是哪一轮选课」这个上下文，返回的是一张空 JSP 模板页（636B，
+   * 标题 "My JSP 'test.htmlx' starting page"），而不是 JSON。这种响应会被
+   * 解析成 0 条，看起来跟"这一轮没课"一模一样 —— 2026-11-03 就是这么被坑了两小时。
+   *
+   * 每一步可以带 captureRegex 从响应正文里抠值（如 toxk('轮次ID')），
+   * 用 captureAs 指定写进上下文的点路径，后续步骤用 ${round.id} 引用。
+   *
+   * 只在**成功**后置位；失败则保持未完成状态，下一轮重试。
+   */
+  async ensureWarmup(rawCtx) {
+    const specs = this.profile.warmup;
+    if (!Array.isArray(specs) || !specs.length) return;
+    if (this.warmupDone) return;
+
+    const ctx = this.baseContext(rawCtx);
+
+    for (const spec of specs) {
+      const res = await this.callStep(spec, ctx);
+
+      if (!spec.captureRegex) continue;
+
+      const re = new RegExp(spec.captureRegex, spec.captureFlags ?? '');
+      const m = re.exec(res.text ?? '');
+      const as = spec.captureAs ?? 'captured';
+
+      if (!m || !m[1]) {
+        const err = new FlowConfigError(
+          `没能从「${spec.label ?? spec.id}」的响应里提取出 ${as}：` +
+            `正则 ${spec.captureRegex} 未命中（${res.status} / ${res.text?.length ?? 0}B / ` +
+            `标题「${titleOf(res.text)}」）。多半是选课批次还没开放，或批次页结构改了。`,
+        );
+        err.isWarmup = true;
+        throw err;
+      }
+
+      setPath(ctx, as, m[1]);
+      setPath(this.warmupCtx, as, m[1]);
+      this.logger?.debug?.(`warmup 捕获 ${as} = ${m[1]}`);
+    }
+
+    this.warmupDone = true;
   }
 
   /**
@@ -127,10 +193,17 @@ export class FlowEngine {
 
   /** 统一的步骤执行：插值 → 请求 → 会话检查。 */
   async callStep(step, ctx) {
-    const headers = {
-      ...(this.profile.headers ?? {}),
-      ...(step.headers ? interpolate(step.headers, ctx) : {}),
-    };
+    // profile.headers 是给**接口**用的（x-requested-with / accept: json / referer 指向选课页）。
+    // 拿它去开 HTML 页面会被服务端当成 AJAX 请求，直接甩回首页 —— 而首页里当然没有轮次 ID。
+    // 所以页面类步骤要能整组替换，而不是叠加。
+    const headers = step.headersReplace
+      ? step.headers
+        ? interpolate(step.headers, ctx)
+        : {}
+      : {
+          ...(this.profile.headers ?? {}),
+          ...(step.headers ? interpolate(step.headers, ctx) : {}),
+        };
 
     const query = mergeObjects(this.profile.query, step.query ? interpolate(step.query, ctx) : null);
     const form = step.body ? interpolate(step.body, ctx) : undefined;
@@ -181,12 +254,29 @@ export class FlowEngine {
 
   /** 拉一次列表并做完列表级过滤。分桶调度时多个桶共用这一次结果。 */
   async fetchItems(rawCtx) {
+    await this.ensureWarmup(rawCtx);
+
     const ctx = this.baseContext(rawCtx);
     const listStep = this.requireStep('list');
     this.stats.cycles += 1;
 
     const res = await this.callStep(listStep, ctx);
     this.stats.lists += 1;
+
+    // 列表的 extract 是 jsonpath，意味着"必须是 JSON"。
+    // 解析不出 JSON 时 extractItems 会返回 []，与"服务端确实没有课"无法区分 ——
+    // 这正是 2026-11-03 空跑两小时的根因：请求形状不对 → 拿到空 JSP 模板 →
+    // 被读成"0 条" → 一直在等一个永远不会来的数据。宁可报错，也不要沉默。
+    if (res.json === null && typeof listStep.extract?.items === 'string' && listStep.extract.items.startsWith('$')) {
+      const head = (res.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      throw new FlowConfigError(
+        `列表接口返回的不是 JSON：HTTP ${res.status} / ${res.text?.length ?? 0}B / ` +
+          `标题「${titleOf(res.text)}」。\n` +
+          `  这不是"没有课"，而是请求没被当成选课列表处理。常见原因：` +
+          `筛选条件没走 URL 查询串、或没先进入选课上下文（profile.warmup）。\n` +
+          `  响应开头：${head}`,
+      );
+    }
 
     let items = extractItems(res.json, listStep.extract?.items);
 

@@ -170,6 +170,16 @@ export class Runner {
         }
 
         this.counters.netErrors += 1;
+
+        // 进不了选课上下文 ≠ 网络故障。前者要按固定节奏重试并给出准确提示，
+        // 否则日志会把它说成"网络异常"，人就会去查网络 —— 查不出问题，然后误判成服务器挂了。
+        if (err.isWarmup) {
+          this.logger?.warn(`尚未进入选课上下文：${err.message ?? err}`);
+          // 第一次业务请求常被 CAS 弹回一次首页，重发即好，不必等 5 秒。
+          await this.sleep(1500);
+          continue;
+        }
+
         const delay = computeDelay(Math.min(this.counters.netErrors - 1, 5), this.backoff, this.rng);
         this.logger?.warn(
           `网络异常（累计 ${this.counters.netErrors} 次）：${err.message ?? err} → ${delay}ms 后继续`,
@@ -440,6 +450,9 @@ export class Runner {
       try {
         const ok = await this.onSessionExpired(err);
         if (ok) {
+          // 换了会话就等于换了服务端 session，之前 warmup 建立的"当前轮次"上下文全没了。
+          // 不重置的话，接下来的列表请求会返回空壳，又被读成"没有课"。
+          if (this.engine) this.engine.warmupDone = false;
           this.logger?.info('会话已恢复，继续抢课');
           await this.sleep(1000);
           return true;

@@ -551,6 +551,7 @@ button{font:inherit}
             <h2>我要的类别</h2>
             <span class="count" id="planCount">—</span>
             <span class="sp"></span>
+            <button class="btn sm ghost" id="btnNewBucket">＋ 新建类别</button>
             <button class="btn sm ghost" id="btnClearPlan">一键清空</button>
             <button class="btn sm ghost" id="btnAuto">一键填充</button>
           </div>
@@ -684,15 +685,52 @@ const BUCKETS = [
     rule:'美学和艺术史论类 / 艺术鉴赏和评论类',
     accepts: c => c.unit === '艺术审美（美学和艺术史论类）' || c.unit === '艺术审美（艺术鉴赏和评论类）' },
 ];
-const BK = new Map(BUCKETS.map(b => [b.id, b]));
+const BK = new Map();
 const COLLAPSE_AT = 3;
 
-// 先把三个类别占好位再渲染：否则 bootstrap 一旦失败（服务没起来 / 接口 500），
+// 类别不是写死的三个：用户可以自建（例如「社会认知」）。
+// BUCKETS 每变动一次都要走 reindex —— 它同时维护 BK 映射和 chains/earned/expanded 的占位。
+// 占位必须在渲染之前做：bootstrap 一旦失败（服务没起来 / 接口 500），
 // renderBuckets 会读到 undefined 直接抛错，右栏变成一片空白 —— 比"报错"更难排查。
-for (const b of BUCKETS) {
-  S.chains[b.id] = [];
-  S.earned[b.id] = 0;
-  S.expanded[b.id] = false;
+function reindexBuckets(){
+  BK.clear();
+  for (const b of BUCKETS) {
+    BK.set(b.id, b);
+    if (!Array.isArray(S.chains[b.id])) S.chains[b.id] = [];
+    if (S.earned[b.id] === undefined) S.earned[b.id] = 0;
+    if (S.expanded[b.id] === undefined) S.expanded[b.id] = false;
+  }
+}
+reindexBuckets();
+
+// 自建类别：归属规则按课程库的 category / unit 同名匹配。
+// 匹不上也没关系 —— 课程仍然可以从左边手动加进来，只是不会自动归属。
+let CUSTOM_SEQ = 0;
+function addBucket(label, need, opts = {}){
+  const name = String(label ?? '').trim();
+  if (!name) return null;
+  const needNum = Math.max(0, Number(need) || 0);
+  if (opts.id && BK.has(opts.id)) {
+    const hit = BK.get(opts.id);
+    hit.need = needNum;
+    return hit;
+  }
+  const dup = BUCKETS.find(b => b.label === name);
+  if (dup) { dup.need = needNum; return dup; }
+  const palette = ['#5ad1e6', '#f27d9d', '#9ee06b', '#e6a05a', '#8fa8ff', '#c0d94a'];
+  const id = opts.id || `c${++CUSTOM_SEQ}_${Date.now().toString(36).slice(-3)}`;
+  const def = {
+    id,
+    label: name,
+    need: needNum,
+    color: palette[BUCKETS.length % palette.length],
+    rule: `类别 = ${name}`,
+    custom: true,
+    accepts: c => c.category === name || c.unit === name,
+  };
+  BUCKETS.push(def);
+  reindexBuckets();
+  return def;
 }
 
 const $ = s => document.querySelector(s);
@@ -780,14 +818,18 @@ function applyConfig(cfg){
   for (const b of BUCKETS) { S.chains[b.id] = []; S.earned[b.id] = 0; }
   const targets = new Map((cfg.targets ?? []).map(t => [t.id, t]));
   for (const bucket of cfg.buckets ?? []) {
-    if (!S.chains[bucket.id]) continue;
+    // 配置里有、界面还不认识的类别（手写 config 加的，或上个版本自建的）：
+    // 补建出来，否则下次保存会把这类候选整桶丢掉 —— 静默丢配置比报错危险。
+    let def = BK.get(bucket.id);
+    if (!def) def = addBucket(bucket.label || bucket.id, Number(bucket.needCredits ?? 0), { id: bucket.id });
+    if (!def) continue;
     const need = Number(bucket.needCredits ?? 0);
-    S.earned[bucket.id] = Math.max(0, (BK.get(bucket.id)?.need ?? 0) - need);
+    S.earned[def.id] = Math.max(0, (def.need ?? 0) - need);
     for (const tid of bucket.targets ?? []) {
       const t = targets.get(tid);
       if (!t) continue;
       const code = t.courseCode?.exact?.[0] ?? t._code;
-      if (code && S.byCode.has(code)) S.chains[bucket.id].push(code);
+      if (code && S.byCode.has(code)) S.chains[def.id].push(code);
     }
   }
 
@@ -907,13 +949,12 @@ $('#password').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn
 $('#captchaCode').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btnCaptcha').click(); });
 
 // ── 课程库 ──────────────────────────────────────────────────
-const FILTERS = [
-  { id:'all',   label:'全部' },
-  { id:'green', label:'绿色文明', color:'#3ddc97', test: c => c.category === '绿色文明' },
-  { id:'innov', label:'创新创业', color:'#f2b544', test: c => c.unit === '创新创业' },
-  { id:'art',   label:'艺术审美', color:'#b98bff', test: c => BUCKETS[2].accepts(c) },
-  { id:'other', label:'不计学分' },
-];
+// 筛选条跟着类别走：新增类别会多出一个筛选，删掉就没有。放在 render 时现算，
+// 避免 FILTERS 与 BUCKETS 两份真相打架（自建类别后不同步是最容易出的 bug）。
+function filterDefs(){
+  const cats = BUCKETS.map(b => ({ id: b.id, label: b.label, color: b.color, test: c => b.accepts(c) }));
+  return [{ id: 'all', label: '全部' }, ...cats, { id: 'other', label: '不计学分' }];
+}
 
 function placement(code){
   for (const b of BUCKETS) {
@@ -924,7 +965,8 @@ function placement(code){
 }
 
 function poolList(){
-  const f = FILTERS.find(x => x.id === S.filter) || FILTERS[0];
+  const defs = filterDefs();
+  const f = defs.find(x => x.id === S.filter) || defs[0];
   const q = S.q.toLowerCase();
   return S.catalog.filter(c => {
     if (f.test) { if (!f.test(c)) return false; }
@@ -936,14 +978,14 @@ function poolList(){
 }
 
 function renderChips(){
-  const counts = {
-    all: S.catalog.filter(c => bucketOf(c)).length,
-    green: S.catalog.filter(c => c.category === '绿色文明').length,
-    innov: S.catalog.filter(c => c.unit === '创新创业').length,
-    art: S.catalog.filter(c => BUCKETS[2].accepts(c)).length,
-    other: S.catalog.filter(c => !bucketOf(c)).length,
-  };
-  $('#chips').innerHTML = FILTERS.map(f => {
+  const defs = filterDefs();
+  const counts = {};
+  for (const f of defs) {
+    if (f.id === 'all') counts[f.id] = S.catalog.filter(c => bucketOf(c)).length;
+    else if (f.id === 'other') counts[f.id] = S.catalog.filter(c => !bucketOf(c)).length;
+    else counts[f.id] = S.catalog.filter(c => f.test(c)).length;
+  }
+  $('#chips').innerHTML = defs.map(f => {
     const on = S.filter === f.id ? ' on' : '';
     const dot = f.color ? `<span class="d" style="--c:${f.color}"></span>` : '';
     return `<button class="chip${on}" data-f="${f.id}">${dot}${f.label}<span class="n">${counts[f.id]}</span></button>`;
@@ -1144,6 +1186,28 @@ $('#btnClearPlan').onclick = () => {
   for (const b of BUCKETS) S.chains[b.id] = [];
   render();
   toast('已清空方案');
+};
+
+// 新建类别：给"学校要求里还有其他类别"的人留的口子。
+// 名称直接照课程库里的分类写（如「社会认知」），归属就能自动匹配上。
+$('#btnNewBucket').onclick = () => {
+  const label = prompt('新类别名称（照课程库里的分类名写，例如：社会认知、科学素养、创新创业）');
+  if (label === null) return;
+  const name = label.trim();
+  if (!name) return toast('名称不能为空');
+  const known = [...new Set(S.catalog.map(c => c.category))].filter(Boolean);
+  if (!known.includes(name) && !S.catalog.some(c => c.unit === name)) {
+    if (!confirm(`课程库里没有「${name}」这个分类。\n\n仍然创建也可以，但这类课不会被自动归类，需要你手动点选加入。继续？`)) return;
+  }
+  const raw = prompt(`「${name}」需要修满几学分？（只填数字）`, '1');
+  if (raw === null) return;
+  const need = Number(raw);
+  if (!Number.isFinite(need) || need < 0) return toast('学分数要填数字');
+  const def = addBucket(name, need);
+  if (!def) return toast('创建失败');
+  S.expanded[def.id] = false;
+  render();
+  toast(`已新建类别「${def.label}」，需 ${need} 学分`);
 };
 
 // 一键填充：每个类别按"2 学分优先 + 学校顺序"取前若干门兜底

@@ -301,6 +301,10 @@ export class HttpClient {
     spec = { ...spec, _chain: chain };
 
     let lastError = null;
+    // 「被弹走」只重发一次。用独立标志而不是 attempt === 0：
+    // 一次网络抖动（ECONNRESET）就会把 attempt 推到 1，之后拿到主页也判不出来，
+    // 于是"重试过就不管被弹"——2026-11-03 实测正是这样白等了十几秒。
+    let bounceRetried = false;
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const startedAt = Date.now();
@@ -329,11 +333,12 @@ export class HttpClient {
         if (
           bounceAllowed &&
           retryMode !== 'none' &&
-          attempt === 0 &&
+          !bounceRetried &&
           attempt < maxAttempts - 1 && // 没有下一次机会时不能 continue，否则会把已拿到的响应丢掉
           res.status < 400 &&
           this._isBounced(spec, res.url)
         ) {
+          bounceRetried = true;
           this.stats.retries += 1;
           this.logger?.debug(`${label} → 被重定向到 ${res.url}，疑似 CAS 弹转，重发一次`);
           continue;

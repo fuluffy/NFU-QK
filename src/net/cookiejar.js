@@ -241,6 +241,18 @@ export class CookieJar {
     return jar;
   }
 
+  /**
+   * 原地替换全部 Cookie —— 用于运行中热加载新的会话文件。
+   * 必须原地替换：HttpClient 持有的是这个 jar 的引用，
+   * 换一个新 jar 对象不会生效（请求仍然带着旧 Cookie）。
+   */
+  replaceFrom(obj, opts = {}) {
+    const next = CookieJar.fromJSON(obj, opts);
+    this.cookies.clear();
+    for (const [k, c] of next.cookies) this.cookies.set(k, c);
+    return this.cookies.size;
+  }
+
   toJSON() {
     return { [SESSION]: 'jar', cookies: this.toStorageState() };
   }
