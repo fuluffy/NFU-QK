@@ -31,16 +31,23 @@ export class SessionLogin {
     this.casBase = opts.casBase ?? CAS_BASE;
     this.serviceUrl = opts.serviceUrl ?? SERVICE_URL;
     this.logger = opts.logger ?? null;
+    /**
+     * net 直接来自 config.net —— 登录这一步也必须享受同样的网络策略。
+     * 之前这里写死默认值，结果实跑能连（run 传了 rejectUnauthorized:false），
+     * 界面登录却报证书错误：用户看到的是"登录失败"，其实是两处客户端不一致。
+     */
+    const net = opts.net ?? {};
     this.jar = new CookieJar();
     this.http = new HttpClient({
       baseUrl: this.casBase,
       cookieJar: this.jar,
-      connectTimeoutMs: 10_000,
-      readTimeoutMs: 30_000,
+      connectTimeoutMs: net.connectTimeoutMs ?? 10_000,
+      readTimeoutMs: net.readTimeoutMs ?? 30_000,
       maxRetries: 3,
       // 正方 + CAS 的重定向链实测 6 跳，默认 5 跳会停在中间
       maxRedirects: 20,
       backoff: { baseMs: 1000, factor: 1.6, maxMs: 8000, jitter: 0.3 },
+      rejectUnauthorized: net.rejectUnauthorized ?? true,
       logger: this.logger,
     });
     this.cas = new WiseduCasClient({ http: this.http, logger: this.logger });

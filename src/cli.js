@@ -83,7 +83,7 @@ const KNOWN_KEYS = {
   schedule: ['startAt', 'prewarmSec', 'highFreqBeforeSec', 'highFreqIntervalMs', 'intervalMs', 'maxRunMinutes'],
   net: [
     'proxy', 'concurrency', 'connectTimeoutMs', 'readTimeoutMs', 'maxRetries',
-    'maxRedirects', 'backoff', 'ipv4First', 'rejectUnauthorized', 'pinnedCertFingerprint', 'dumpDir',
+    'maxRedirects', 'backoff', 'ipv4First', 'rejectUnauthorized', 'dumpDir',
   ],
   'net.backoff': ['baseMs', 'factor', 'maxMs', 'jitter'],
   safety: ['dryRun', 'maxSubmitsPerMinute'],
@@ -96,6 +96,7 @@ const UNIMPLEMENTED = new Map([
   ['strategy.requireAllDimensions', '未实现 —— 当前凡配置了的维度都必须全部满足，没有开关'],
   ['schedule.clockSyncSec', '未实现 —— 时钟偏移在每次响应时自动校准，不需要配置'],
   ['net.degradeToDom', '未实现 —— DOM 降级只停留在设计稿（见 README 待办）'],
+  ['net.pinnedCertFingerprint', '未实现 —— 证书指纹固定没有接线；要放宽校验请用 net.rejectUnauthorized=false'],
   ['net.webvpn', '未实现 —— 校外访问请用系统代理 / VPN 客户端'],
   ['safety.autoDropConflicting', '未实现 —— 自动退课从未接线，退课请手工在教务系统操作'],
   ['safety.neverDropTypes', '未实现 —— 同上'],
@@ -512,11 +513,24 @@ async function cmdLogin(args) {
   logger.info(`账号 ${username}`);
   logger.debug(`密码长度 ${password.length}（不记录内容）`);
 
+  // 登录也要吃 config.net：证书链不全的"不安全模式"下，只放宽 run 那一侧
+  // 会让登录这一步先失败，而报错看起来像账号问题。
+  let loginNet = {};
+  try {
+    const { config } = await loadConfig(args.config);
+    loginNet = config.net ?? {};
+  } catch {
+    loginNet = {};
+  }
+  if (loginNet.rejectUnauthorized === false) {
+    logger.warn('⚠ 已关闭 TLS 证书校验（config.net.rejectUnauthorized=false）');
+  }
+
   const jar = new CookieJar();
   const client = new HttpClient({
     baseUrl: casBase,
     cookieJar: jar,
-    connectTimeoutMs: args.timeout ? Number(args.timeout) : 10_000,
+    connectTimeoutMs: args.timeout ? Number(args.timeout) : (loginNet.connectTimeoutMs ?? 10_000),
     readTimeoutMs: 30_000,
     maxRetries: 3,
     // 正方 + CAS 的重定向链很长：实测"登录后首次访问选课页"需要 6 跳
@@ -524,6 +538,7 @@ async function cmdLogin(args) {
     // 默认 5 跳会停在中间，表现为"会话可疑：HTTP 302"。
     maxRedirects: 20,
     backoff: { baseMs: 1000, factor: 1.6, maxMs: 8000, jitter: 0.3 },
+    rejectUnauthorized: loginNet.rejectUnauthorized ?? true,
     logger,
   });
   const cas = new WiseduCasClient({ http: client, logger });

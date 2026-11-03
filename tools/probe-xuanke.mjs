@@ -15,8 +15,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { HttpClient } from '../src/net/http-client.js';
+import { HttpClient, applyIpv4First } from '../src/net/http-client.js';
 import { CookieJar } from '../src/net/cookiejar.js';
+import { FlowEngine } from '../src/flow/engine.js';
 import { loadProfile } from '../src/flow/profile.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -48,12 +49,26 @@ try {
 }
 
 const profile = await loadProfile(profileName);
+
+// 体检必须和实跑用同一套网络策略：只放宽 run 那一侧的话，这里会先报证书错误，
+// 看起来像"学校服务器挂了"，实际是两处客户端不一致。
+let cfg = null;
+try {
+  cfg = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+} catch {
+  // 配置读不到不致命：后面的"配置匹配检查"会跳过
+}
+const net = cfg?.net ?? {};
+if (net.ipv4First !== false) applyIpv4First();
+
 const client = new HttpClient({
   baseUrl: profile.baseUrl,
   cookieJar: jar,
-  connectTimeoutMs: 8000,
-  readTimeoutMs: 25_000,
-  maxRedirects: 20,
+  connectTimeoutMs: net.connectTimeoutMs ?? 8000,
+  readTimeoutMs: net.readTimeoutMs ?? 25_000,
+  maxRedirects: net.maxRedirects ?? 20,
+  backoff: net.backoff,
+  rejectUnauthorized: net.rejectUnauthorized ?? true,
 });
 
 line('');
@@ -93,13 +108,12 @@ line('② 课程列表端点');
 const listStep = (profile.steps ?? []).find((s) => s.id === 'list');
 let listItems = null;
 try {
-  const r = await client.request({
-    method: listStep.method ?? 'POST',
-    path: listStep.path,
-    form: listStep.body,
-    headers: { ...(profile.headers ?? {}), ...(listStep.headers ?? {}) },
-    retry: 'none',
-  });
+  // 必须先走 warmup，否则服务端 session 里没有"当前是哪一轮"，
+  // 列表接口回的是 636B 空 JSP 壳子 —— 和"端点写错"长得一模一样，
+  // 体检就会给出错误结论。这里直接借引擎的链路，保证与实跑完全一致。
+  const engine = new FlowEngine({ client, profile, dryRun: true, logger: null });
+  await engine.ensureWarmup({});
+  const r = await engine.callStep(listStep, engine.baseContext({}));
   const title = (r.text.match(/<title>([^<]*)<\/title>/i) ?? [])[1] ?? '';
   if (r.json) {
     const spec = listStep.extract?.items;
@@ -145,12 +159,7 @@ if (!listItems?.length) {
   if (missing.length) bad(`列表里没有这些字段：${missing.join('、')} —— 改 profile.matchFields`);
   else ok('profile 需要的字段在列表里都存在');
 
-  let cfg = null;
-  try {
-    cfg = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-  } catch {
-    warn(`读不到 ${path.relative(ROOT, configFile)}，跳过配置匹配检查`);
-  }
+  if (!cfg) warn(`读不到 ${path.relative(ROOT, configFile)}，跳过配置匹配检查`);
   if (cfg) {
     const codeKey = fields.code ?? 'kch';
     const inList = new Set(listItems.map((it) => String(it[codeKey] ?? '').trim()));

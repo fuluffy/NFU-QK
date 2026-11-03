@@ -157,7 +157,10 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
     setPhase('running', '正在登录…');
     state.logs.length = 0;
 
-    const login = new SessionLogin({ username, password, logger: uiLogger });
+    // 登录同样要遵守 config.net —— 证书链有问题时（"不安全模式"），
+    // 只让 run 放宽而登录不放宽，界面就会卡在第 1 步。
+    const cfg = state.config ?? (await loadConfigFile());
+    const login = new SessionLogin({ username, password, logger: uiLogger, net: cfg.net ?? {} });
     state.pendingLogin = login;
     try {
       const r = await login.start();

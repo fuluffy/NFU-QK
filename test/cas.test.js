@@ -321,3 +321,32 @@ test('端到端：服务端要求验证码时抛出 CaptchaRequiredError（交�
     await cas.close();
   }
 });
+
+/**
+ * 登录这一步也必须遵守 config.net。
+ *
+ * 事故背景：教务系统证书 2025-03 就过期了（实测严格模式直接 CERT_HAS_EXPIRED）,
+ * 实跑链路配了 net.rejectUnauthorized=false 能连，但界面第 1 步用的是另一个
+ * HttpClient，写死了默认严格模式 —— 于是"能登录"和"能选课"两件事在不同地方失败，
+ * 报错还都长得像账号问题。
+ */
+test('SessionLogin 会把 net.rejectUnauthorized 传给自己的 HttpClient', async () => {
+  const { SessionLogin } = await import('../src/auth/session-login.js');
+  const loose = new SessionLogin({ username: 'u', password: 'p', net: { rejectUnauthorized: false } });
+  try {
+    assert.equal(
+      loose.http.agents.https.options.rejectUnauthorized,
+      false,
+      '关闭校验必须真的落到 https.Agent 上，否则等于没配',
+    );
+  } finally {
+    loose.http.destroy();
+  }
+
+  const strict = new SessionLogin({ username: 'u', password: 'p' });
+  try {
+    assert.equal(strict.http.agents.https.options.rejectUnauthorized, true, '默认仍要严格校验');
+  } finally {
+    strict.http.destroy();
+  }
+});
