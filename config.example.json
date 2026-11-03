@@ -67,20 +67,19 @@
   "net": {
     "proxy": null,
     "concurrency": 1,
-    "connectTimeoutMs": 5000,
+    "connectTimeoutMs": 15000,
     "readTimeoutMs": 20000,
-    "maxRetries": 6,
+    "maxRetries": 8,
     "maxRedirects": 20,
     "backoff": {
-      "baseMs": 1500,
-      "factor": 1.6,
-      "maxMs": 15000,
-      "jitter": 0.3
+      "baseMs": 400,
+      "factor": 1.2,
+      "maxMs": 2000,
+      "jitter": 0.35
     },
     "ipv4First": true,
-    "rejectUnauthorized": true,
-    "_rejectUnauthorized_note": "2026-09-17 实测证书 *.njfu.edu.cn 有效（2026-01-29 → 2027-01-29），保持严格校验即可。若某天出现 CERT_HAS_EXPIRED（学校忘续期），可临时改为 false 让程序继续工作；届时建议同时填 pinnedCertFingerprint 以保留防中间人能力。",
-    "pinnedCertFingerprint": null
+    "rejectUnauthorized": false,
+    "_rejectUnauthorized_note": "2026-11-03 实测：*.njfu.edu.cn 证书已于 2025-03-04 过期，严格校验下所有请求都是 CERT_HAS_EXPIRED。这个开关必须保持 false，否则登录都进不去。代价是理论上存在中间人风险，别在公共网络下用。"
   },
   "safety": {
     "dryRun": true,

@@ -218,3 +218,24 @@ test('会话文件损坏时当作未登录，而不是报错', async () => {
     await app.close();
   }
 });
+
+/**
+ * 全新 clone（没有任何配置）也必须能登录。
+ *
+ * 以前 fallback 是个光秃秃的 `{profile, targets:[], buckets:[]}`，没有 net 段，
+ * 于是退回严格证书校验 —— 而学校证书 2025-03 就过期了，"刚下载下来连登录页都打不开"。
+ */
+test('没有配置文件时，默认配置自带可用的 net 段', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'nfqk-first-'));
+  const app = await boot({ root });
+  try {
+    const d = await (await app.get('/api/bootstrap')).json();
+    assert.equal(d.config?.net?.rejectUnauthorized, false, '首次使用必须放宽证书校验，否则登录必失败');
+    assert.ok(
+      Number(d.config?.net?.connectTimeoutMs) >= 10000,
+      '握手实测 300ms~40s，连接超时不能短于 10 秒',
+    );
+  } finally {
+    await app.close();
+  }
+});

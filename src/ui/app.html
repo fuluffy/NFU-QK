@@ -1266,6 +1266,9 @@ function buildConfig(){
   return {
     ...base,
     profile: base.profile ?? 'ggxxk-xsxkkc',
+    // net 必须跟着写回去：缺少它会退回严格证书校验，而学校证书 2025-03 就过期了，
+    // 表现就是"昨天还能登录，今天怎么都连不上"。
+    net: { rejectUnauthorized: false, ipv4First: true, connectTimeoutMs: 15000, maxRetries: 8, ...(base.net ?? {}) },
     targets,
     buckets,
     strategy: { ...(base.strategy ?? {}), stopAfterSuccess: false },

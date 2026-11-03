@@ -30,6 +30,23 @@ const MIME = {
 
 const MAX_LOGS = 1200;
 
+/**
+ * 首次使用时的网络默认值。
+ *
+ * `rejectUnauthorized:false` 是刻意写在这里的：学校证书 2025-03 就过期了，
+ * 严格校验下连登录页都打不开。宁可默认能用，也不要让新用户先撞一堵墙
+ * 再去翻文档 —— 风险说明见 README 与 docs/实战应急手册.md。
+ */
+const DEFAULT_NET = {
+  concurrency: 1,
+  connectTimeoutMs: 15_000,
+  readTimeoutMs: 20_000,
+  maxRetries: 8,
+  maxRedirects: 20,
+  ipv4First: true,
+  rejectUnauthorized: false,
+};
+
 export function createApp({ root, configFile = 'config.ggxxk.json' }) {
   const state = {
     logs: [],
@@ -85,13 +102,18 @@ export function createApp({ root, configFile = 'config.ggxxk.json' }) {
       return JSON.parse(await readFile(state.configPath, 'utf8'));
     } catch (err) {
       if (err.code !== 'ENOENT') throw err;
-      // 第一次使用：拿默认配置当底稿
-      const fallback = path.resolve(root, 'config.json');
-      try {
-        return JSON.parse(await readFile(fallback, 'utf8'));
-      } catch {
-        return { profile: 'ggxxk-xsxkkc', targets: [], buckets: [] };
+      // 第一次使用：依次拿 config.json / config.example.json 当底稿
+      for (const name of ['config.json', 'config.example.json']) {
+        try {
+          return JSON.parse(await readFile(path.resolve(root, name), 'utf8'));
+        } catch {
+          /* 继续找下一个 */
+        }
       }
+      // 全都没有：给一份能直接用的默认配置。
+      // net 段不能省 —— 学校证书 2025-03 就过期了，缺了它登录都进不去，
+      // 而新用户不会想到要去手写 JSON。
+      return { profile: 'ggxxk-xsxkkc', targets: [], buckets: [], net: DEFAULT_NET };
     }
   }
 
