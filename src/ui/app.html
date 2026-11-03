@@ -6,6 +6,10 @@
 <title>南林选课助手</title>
 <style>
 :root{
+  /* 告诉浏览器"这个页面是深色的"：原生控件（下拉框、滚动条、日期选择器）会跟着变深色。
+     只给 select 写 background 是不够的 —— 展开后的选项列表由系统绘制，
+     不声明 color-scheme 就会是白底 + 系统蓝高光，跟整页格格不入。 */
+  color-scheme: dark;
   --bg:#08090c;
   --panel:rgba(255,255,255,.032);
   --panel-hi:rgba(255,255,255,.055);
@@ -461,13 +465,17 @@ button{font:inherit}
   display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--faint);
 }
 .minisel select{
-  appearance:none;background:rgba(255,255,255,.05);color:var(--text);
+  appearance:none;-webkit-appearance:none;
+  background-color:rgba(255,255,255,.05);color:var(--text);
   border:1px solid var(--line);border-radius:7px;padding:3px 20px 3px 8px;
   font:inherit;font-size:11.5px;cursor:pointer;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238b929f' stroke-width='1.4'/></svg>");
   background-repeat:no-repeat;background-position:right 6px center;background-size:8px;
 }
 .minisel select:focus{outline:none;border-color:var(--line-hi)}
+/* 展开的选项列表也要显式配色：Windows 上即使有 color-scheme，下拉面板仍可能回落到系统白底 */
+.minisel select option{background:#14161c;color:var(--text)}
+.minisel select option:checked{background:rgba(122,162,255,.28);color:#fff}
 .check{
   display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--dim);cursor:pointer;user-select:none;
 }
@@ -661,7 +669,6 @@ button{font:inherit}
             <label class="minisel"><span>学期</span><select id="termSel">
               <option value="autumn">秋</option>
               <option value="spring">春</option>
-              <option value="summer">夏</option>
               <option value="all">全部</option>
             </select></label>
             <label class="check"><input type="checkbox" id="onlyOpen" checked> 只看开课</label>
@@ -1031,16 +1038,11 @@ function addBucket(label, need, opts = {}){
 }
 
 /**
- * 删除类别。
- *
- * 最少留一个：一个都没有的话，"抢什么"这件事就不成立了，界面也会变成空壳。
+ * 删除类别。允许删到**一个不留** —— 但类别为 0 时第 3 步会被拦下
+ * （goStep 里统一拦截），所以不会出现"点了开始抢课却什么都没配"的空转。
  * 删掉的类别连同它的候选一起消失 —— 但**不动课程库**，课程还在左边，随时能加回来。
  */
 function removeBucket(id){
-  if (BUCKETS.length <= 1) {
-    toast('最少要留一个类别 —— 全删掉就不知道要抢什么了');
-    return false;
-  }
   const i = BUCKETS.findIndex(b => b.id === id);
   if (i < 0) return false;
   const b = BUCKETS[i];
@@ -1057,7 +1059,7 @@ function removeBucket(id){
   // 筛选条现在按课程库的类别名走，不是按桶 id —— 用 label 比对才有效
   if (S.filter === b.label) S.filter = 'all';
   render();
-  toast(`已删除类别「${b.label}」`);
+  toast(n ? `已删除类别「${b.label}」` : `已删除空的类别「${b.label}」`);
   return true;
 }
 
@@ -1087,6 +1089,13 @@ function toast(msg){
 
 // ── 步骤切换 ────────────────────────────────────────────────
 function goStep(n){
+  // 类别删空是允许的（"从零开始"），但第 3 步必须有东西可抢 —— 在唯一的入口拦住。
+  // 所有路径（导航栏「3 开抢」、「下一步：开抢」、?step=3 直达）都汇到这里，一处拦截全覆盖。
+  if (n === 3 && !BUCKETS.length) {
+    toast('至少需要 1 个类别 —— 回第 2 步点选一门课，或点「＋ 新建类别」');
+    if (S.step !== 2) goStep(2);
+    return;
+  }
   S.step = n;
   for (const i of [1,2,3]) {
     const pane = $('#pane' + i);
@@ -1102,7 +1111,8 @@ function goStep(n){
 
 function renderSteps(){
   const logged = Boolean(S.session?.exists);
-  const ready = BUCKETS.every(b => stateNeed(b.id) === 0 || chainCredits(b.id) >= stateNeed(b.id));
+  // 空数组上 every() 恒为 true —— 类别删空时第 2 步绝不能打勾
+  const ready = BUCKETS.length > 0 && BUCKETS.every(b => stateNeed(b.id) === 0 || chainCredits(b.id) >= stateNeed(b.id));
   $('#n1').textContent = logged ? '✓' : '1';
   $('#n2').textContent = ready ? '✓' : '2';
   $('#n3').textContent = '3';
@@ -1192,7 +1202,12 @@ function renderCatInfo(){
 /** 学期/只看开课这两个控件与状态同步（导入后、重进页面时都要对）。 */
 function syncCatalogControls(){
   const sel = $('#termSel');
-  if (sel) sel.value = S.term;
+  if (sel) {
+    // 后端还认识 summer，界面只放春/秋 —— 配置里万一是夏，就退回本学期，别让下拉空白
+    const has = [...sel.options].some(o => o.value === S.term);
+    if (!has) S.term = 'autumn';
+    sel.value = S.term;
+  }
   const cb = $('#onlyOpen');
   if (cb) cb.checked = S.onlyOpen;
 }
@@ -1461,6 +1476,23 @@ function renderPool(){
   }).join('');
 }
 
+/**
+ * 点了一门"不属于任何已有类别"的课 —— 自动建类别，别让用户先去建再回来点。
+ * 名字优先用「课程单元」（更细：创新创业 / 组织管理…），没有再退到「类别」。
+ * 学分先按这门课的学分给个默认值，用户可以在卡片上改（或删掉重建）。
+ */
+function ensureBucketFor(c){
+  const label = String(c.unit || c.category || '').trim();
+  if (!label) return null;
+  if (BUCKETS.length >= S.maxBuckets) {
+    toast(`已有 ${S.maxBuckets} 个类别（上限）—— 先在高级设置里调高上限，或删掉一个不用的类别`);
+    return null;
+  }
+  const def = addBucket(label, Math.max(1, Number(c.credits) || 1));
+  if (def) S.expanded[def.id] = false;
+  return def;
+}
+
 $('#pool').addEventListener('click', e => {
   const row = e.target.closest('[data-code]');
   if (!row) return;
@@ -1472,12 +1504,27 @@ $('#pool').addEventListener('click', e => {
   if (put) {
     chainOf(put.b.id).splice(put.i, 1);
     toast(`已从「${put.b.label}」移出`);
-  } else {
-    const b = bucketOf(c);
-    if (!b) return toast('这门课不计入任何目标类别');
+    render();
+    return;
+  }
+
+  const b = bucketOf(c);
+  if (b) {
     chainOf(b.id).push(code);
     toast(`已加入「${b.label}」`);
+    render();
+    return;
   }
+
+  // 没有对应的类别：自动建一个再加进去（用户的心智是"点课 = 我要这门"，
+  // 不该被"先去建类别"拦住）。
+  const created = ensureBucketFor(c);
+  if (!created) {
+    if (String(c.unit || c.category || '').trim()) return; // 已达上限，toast 已经在 ensureBucketFor 里给过
+    return toast('这门课在课程表里没有「类别 / 单元」，无法自动归类 —— 请手动新建一个类别');
+  }
+  chainOf(created.id).push(code);
+  toast(`已自动建类别「${created.label}」（需 ${created.need} 学分）并加入这门课`);
   render();
 });
 
@@ -1777,7 +1824,19 @@ function renderPrecheck(d){
 
 // ── 方案 ────────────────────────────────────────────────────
 function renderBuckets(){
-  const onlyOne = BUCKETS.length <= 1;
+  if (!BUCKETS.length) {
+    // 一个类别都不剩：不是错误状态，是合法的"从零开始"。
+    // 第 3 步会被 goStep 拦住，所以这里只管把话说清楚。
+    $('#buckets').innerHTML = `<div class="empty" style="padding:34px 20px">
+      还没有任何类别<br>
+      <span style="font-size:11px">从左边点选一门课就会自动建类别；或点右上角「＋ 新建类别」</span>
+    </div>`;
+    $('#planCount').textContent = '0 门';
+    const btnNew = $('#btnNewBucket');
+    if (btnNew) { btnNew.disabled = false; btnNew.title = '新建一个类别'; btnNew.textContent = '＋ 新建类别'; }
+    return;
+  }
+
   $('#buckets').innerHTML = BUCKETS.map(b => {
     const chain = chainOf(b.id);
     const need = stateNeed(b.id);
@@ -1801,13 +1860,12 @@ function renderBuckets(){
       </div>`;
     }).join('');
 
-    return `<div class="bkt${onlyOne ? ' locked' : ''}" data-bkt="${b.id}" style="--c:${b.color}">
+    return `<div class="bkt" data-bkt="${b.id}" style="--c:${b.color}">
       <div class="bkt-head">
         <span class="dot"></span>
         <h3>${esc(b.label)}</h3>
         <span class="st${need === 0 ? ' ok' : ''}">${need === 0 ? '已修满' : done ? `需 ${need} 分` : `还差 ${shortfall} 分`}</span>
-        <button class="delbkt" data-delbkt="${b.id}" title="${onlyOne ? '至少要留一个类别' : '删除这个类别'}"
-          ${onlyOne ? 'disabled' : ''}><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke-linecap="round"/></svg></button>
+        <button class="delbkt" data-delbkt="${b.id}" title="删除这个类别"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke-linecap="round"/></svg></button>
       </div>
       <div class="bkt-meta">
         <span class="rule" title="${esc(b.rule)}">${esc(b.rule)}</span>
@@ -2099,7 +2157,7 @@ function renderSummary(){
     ? `到点自动开始，提前约 2 分钟进入预热`
     : '未设定 —— 点了按钮立刻开始';
 
-  const ready = BUCKETS.every(b => stateNeed(b.id) === 0 || chainOf(b.id).length > 0);
+  const ready = BUCKETS.length > 0 && BUCKETS.every(b => stateNeed(b.id) === 0 || chainOf(b.id).length > 0);
   $('#btnDry').disabled = !ready;
   $('#btnLive').disabled = !ready;
 
@@ -2108,6 +2166,7 @@ function renderSummary(){
   const block = $('#runBlock');
   if (block) {
     const lines = [];
+    if (!BUCKETS.length) lines.push('至少需要 1 个类别 —— 回第 2 步点选一门课，或点「＋ 新建类别」。');
     if (missing.length) {
       lines.push(`还不能开始：${missing.map(b => `「${b.label}」`).join('、')} 没有候选课程 —— 回第 2 步至少给每类选一门。`);
     }
@@ -2138,6 +2197,8 @@ function saveConfigSilent(){
 $('#startAt').addEventListener('change', () => { saveConfigSilent(); renderSummary(); });
 
 async function startRun(live){
+  // 与 goStep 的拦截保持同一口径：没有类别 / 有类别但没候选，都不能发请求
+  if (!BUCKETS.length) return toast('至少需要 1 个类别 —— 回第 2 步点选一门课');
   const ready = BUCKETS.every(b => stateNeed(b.id) === 0 || chainOf(b.id).length > 0);
   if (!ready) return toast('还有类别没有候选课程');
   if (live) {
