@@ -1,28 +1,33 @@
+# 注意：这些路径都带前导 `/`，只锚定仓库根目录。
+# 写成 `state/` 会连 `src/state/` 一起忽略 —— 曾经因此把 `src/state/store.js`
+# 漏在仓库外，别人 clone 下来 5 个测试文件直接模块加载失败。
+# 新增忽略规则时请保持同样的写法。
+
 # ── 凭证与运行时产物：绝不可提交 ────────────────────────────────
-# state/session.json 等同于登录凭证（含 bzb_njw / SERVERID / CASTGC），
+# /state/session.json 等同于登录凭证（含 bzb_njw / SERVERID / CASTGC），
 # 拿到它就等于拿到你的账号登录态。
-state/
-config.json
+/state/
+/config.json
 
 # ── 取证与侦察产物：含页面快照与会话，且是本机调试资料 ──────────
-.recon/
-recon/
-.state/
+/.recon/
+/recon/
+/.state/
 *.log
 
 # ── 依赖与工具产物 ────────────────────────────────────────────
-node_modules/
-.npm/
+/node_modules/
+/.npm/
 *.tsbuildinfo
 
 # ── 编辑器 / 系统 ─────────────────────────────────────────────
-.vscode/
-.idea/
+/.vscode/
+/.idea/
 Thumbs.db
 Desktop.ini
 
 # ── 工作区助手产物（记忆/会话），不入库 ──────────────────────
-.workbuddy/
+/.workbuddy/
 
 # ── 个人选课配置：由配置界面生成，含个人志愿，不入库 ──────────
-config.ggxxk.json
+/config.ggxxk.json
