@@ -549,6 +549,19 @@ export class HttpClient {
                   if (Array.isArray(spec._chain)) {
                     spec._chain.push({ status: 'js-redirect', from: u.toString(), to: nextUrl });
                   }
+                  // 3xx 那条路早就拦了登出入，JS 跳转这条路以前漏了 —— 而正方恰好
+                  // 是用 `window.location = '/authserver/logout?service=...'` 把人踢出去的。
+                  // 跟过去 = CAS 单点登出 = SSO 会话（含用户自己浏览器里的）全部作废。
+                  if (LOGOUT_REDIRECT_RE.test(nextUrl)) {
+                    settled = true;
+                    reject(
+                      new NetworkError(
+                        '服务端用 JS 跳转指向登出入口，已拒绝跟随（跟随会触发 CAS 单点登出，作废整个 SSO 会话）',
+                        { code: 'LOGOUT_REDIRECT', kind: 'logout-redirect', url: nextUrl, retryable: false },
+                      ),
+                    );
+                    return;
+                  }
                   settled = true;
                   this.logger?.debug(`JS 跳转存根 → ${nextUrl}`);
                   this._once(

@@ -77,3 +77,43 @@ test('重定向到 /authserver/login 属于正常登录跳转，必须照常跟�
     await mock.close();
   }
 });
+
+/**
+ * 真正踩到的坑（2026-11-03 13:22 实跑）：正方不是用 3xx，而是回一个 200 的 HTML，
+ * 里面 `window.location = '/authserver/logout?service=...'`。
+ * 3xx 那条路早就拦了，JS 跳转这条路漏了 —— 于是每跑几十秒就把自己的 SSO 会话登出一次，
+ * 连用户浏览器里的登录态一起作废。
+ */
+test('JS 跳转指向 /authserver/logout 时同样拒绝跟随', async () => {
+  const hits = [];
+  const server = http.createServer((req, res) => {
+    hits.push(req.url);
+    if (req.url.startsWith('/jsxsd/')) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(`<html><script>window.location.href='/authserver/logout?service=x';</script></html>`);
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end('ok');
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const client = new HttpClient({ baseUrl: base, logger: silentLogger, maxRetries: 0 });
+  try {
+    const err = await client
+      .request({ method: 'POST', path: '/jsxsd/xsxkkc/xsxkGgxxkxk', form: { a: '1' }, label: 'list' })
+      .then(() => null, (e) => e);
+
+    assert.ok(err, '应当抛错而不是静默跟随');
+    assert.equal(err.kind, 'logout-redirect');
+    assert.equal(err.retryable, false);
+    assert.ok(
+      !hits.some((u) => u.startsWith('/authserver/logout')),
+      '绝不能真的发出登出请求，否则 CAS 单点登出会作废整个 SSO 会话',
+    );
+  } finally {
+    client.destroy();
+    await new Promise((r) => server.close(r));
+  }
+});

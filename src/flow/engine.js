@@ -208,19 +208,32 @@ export class FlowEngine {
     const query = mergeObjects(this.profile.query, step.query ? interpolate(step.query, ctx) : null);
     const form = step.body ? interpolate(step.body, ctx) : undefined;
 
-    const res = await this.client.request({
-      method: step.method ?? 'POST',
-      path: step.path,
-      query: Object.keys(query).length ? query : undefined,
-      form,
-      headers,
-      // 提交类步骤在 profile 里显式标 retry:'none'；这里再兜一层保险
-      retry: step.id === 'submit' ? 'none' : step.retry ?? 'safe',
-      // 列表是只读的，被 CAS 弹走后可以安全重发；其余步骤按 GET/POST 默认规则走
-      retryOnBounce: step.retryOnBounce ?? step.id === 'list',
-      maxAttempts: step.maxAttempts,
-      label: step.label ?? `${this.profile.name ?? 'flow'}/${step.id}`,
-    });
+    let res;
+    try {
+      res = await this.client.request({
+        method: step.method ?? 'POST',
+        path: step.path,
+        query: Object.keys(query).length ? query : undefined,
+        form,
+        headers,
+        // 提交类步骤在 profile 里显式标 retry:'none'；这里再兜一层保险
+        retry: step.id === 'submit' ? 'none' : step.retry ?? 'safe',
+        // 列表是只读的，被 CAS 弹走后可以安全重发；其余步骤按 GET/POST 默认规则走
+        retryOnBounce: step.retryOnBounce ?? step.id === 'list',
+        maxAttempts: step.maxAttempts,
+        label: step.label ?? `${this.profile.name ?? 'flow'}/${step.id}`,
+      });
+    } catch (err) {
+      // 服务端要我们"登出"= 这个应用的会话已经失效。
+      // 客户端已经拒绝跟随（跟过去会把 CAS 的 SSO 会话一起作废，连用户浏览器都会被踢下线），
+      // 这里必须翻译成"会话失效"，让上层去重登，而不是当网络故障无限重试。
+      if (err?.kind === 'logout-redirect') {
+        throw new SessionExpiredError('会话失效：服务端要求登出（已拒绝跟随，保全 SSO 会话）', {
+          url: err.url,
+        });
+      }
+      throw err;
+    }
 
     this.assertSession(res);
     return res;
