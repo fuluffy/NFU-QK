@@ -44,6 +44,13 @@ export class Runner {
     this.limiter = new SlidingWindowLimiter(this.safety.maxSubmitsPerMinute ?? 6, this.now);
     this.stopped = false;
     this.counters = { cycles: 0, netErrors: 0, sessionRelogins: 0, logThrottle: 0 };
+    /**
+     * 同一状态连续输出会淹没日志，但节流**必须按消息自身为单位**，不能全局共用一个计数。
+     * 曾经的写法是"全局第 1 次 / 每 20 次才打印"，结果 4 个类别每轮各报一句，
+     * 只有排在第一位的类别能挤进日志 —— 看起来像"只有一个桶在跑"。
+     */
+    this.logThrottleMs = opts.logThrottleMs ?? 15_000;
+    this.throttleAt = new Map();
     /** 满员降级：目标 id → 首次发现满员的时间 / 已降级集合 */
     this.fullSince = new Map();
     this.demoted = new Set();
@@ -105,6 +112,25 @@ export class Runner {
         `分桶模式：${this.buckets.length} 个类别 —— ` +
           this.buckets.map((b) => `${b.label ?? b.id} ${b.needCredits} 学分`).join('、'),
       );
+      // 逐桶报一次候选清单：配错的桶（引用了不存在的目标 id）在这里就会露出来，
+      // 而不是等到开抢时看"某个类别一直 0 条"才怀疑人生。
+      for (const b of this.buckets) {
+        const label = b.label ?? b.id;
+        const names = [];
+        const missing = [];
+        for (const id of b.targets) {
+          const t = this.store.get(id)?.target;
+          if (!t) {
+            missing.push(id);
+            continue;
+          }
+          names.push(t._name ?? t.courseName?.include?.join('/') ?? id);
+        }
+        this.logger?.info(`  · ${label}：${names.join('、') || '（无候选）'}`);
+        if (missing.length) {
+          this.logger?.warn(`  · ${label}：以下目标 id 在 targets 里不存在 —— ${missing.join('、')}`);
+        }
+      }
     }
 
     while (!this.stopped) {
@@ -152,7 +178,6 @@ export class Runner {
       try {
         const result = await this.cycle(ctx);
         lastPollStatus = result?.status ?? null;
-        this.counters.logThrottle = 0;
 
         // 干跑只跑一轮：目的是让人看清"会选哪门课"，而不是蹲守
         if (this.engine.dryRun) {
@@ -241,13 +266,14 @@ export class Runner {
     const poll = await this.engine.poll(ctx);
 
     if (poll.status === 'no-target' || poll.status === 'no-match') {
-      this.logThrottled(`未匹配到目标（列表 ${poll.count} 条），继续轮询…`);
+      this.logThrottled('no-match', `未匹配到目标（列表 ${poll.count} 条），继续轮询…`);
       return poll;
     }
 
     if (poll.status === 'found-full') {
       this.noteFull(poll.match.target, this.now());
       this.logThrottled(
+        'found-full',
         `找到「${describe(poll.match)}」但当前已满员（${poll.count} 条课程），等待有人退课…`,
       );
       return poll;
@@ -373,22 +399,30 @@ export class Runner {
     );
 
     let matchedCount = 0;
+    /** 本轮每个类别的状态，最后合成一行输出 —— 让人一眼看到"别的桶也在跑" */
+    const progress = [];
+
     for (const r of poll.results) {
       const bucket = open.find((b) => b.id === r.bucketId);
       if (!bucket) continue;
       const tag = bucket.label ?? bucket.id;
+      const got = this.bucketCredits.get(bucket.id) ?? 0;
 
       if (r.status === 'no-match') {
-        this.logThrottled(`「${tag}」未匹配到候选（列表 ${poll.count} 条）`);
+        progress.push(`${tag} ${got}/${bucket.needCredits} 无候选`);
         continue;
       }
       if (r.status === 'found-full') {
         this.noteFull(r.match.target, this.now());
+        progress.push(`${tag} ${got}/${bucket.needCredits} 满员`);
         this.logThrottled(
-          `「${tag}」候选「${describe(r.match)}」已满员（已修 ${bucket.got}/${bucket.needCredits} 学分），等退课…`,
+          `full:${bucket.id}`,
+          `「${tag}」候选「${describe(r.match)}」已满员（已修 ${got}/${bucket.needCredits} 学分），等退课…`,
         );
         continue;
       }
+
+      progress.push(`${tag} ${got}/${bucket.needCredits} 命中`);
 
       await this.limiter.acquire(this.sleep);
 
@@ -428,6 +462,14 @@ export class Runner {
       }
     }
 
+    // 一行汇总所有类别的本轮状态。节流按 key 走，不会挤掉别的桶的消息。
+    if (progress.length) {
+      this.logThrottled(
+        'buckets-summary',
+        `本轮列表 ${poll.count} 条｜${progress.join(' · ')}`,
+      );
+    }
+
     return { status: 'ok', count: poll.count, matched: matchedCount };
   }
 
@@ -448,8 +490,11 @@ export class Runner {
 
     if (this.onSessionExpired) {
       try {
-        const ok = await this.onSessionExpired(err);
-        if (ok) {
+        const st = await this.onSessionExpired(err);
+        // 'waiting' = 还没等到新登录。回调已经把话说清楚了，这里不能再报"已恢复"，
+        // 否则日志上看着像在正常抢课，实际每轮都在被弹回登录页。
+        if (st === 'waiting') return true;
+        if (st) {
           // 换了会话就等于换了服务端 session，之前 warmup 建立的"当前轮次"上下文全没了。
           // 不重置的话，接下来的列表请求会返回空壳，又被读成"没有课"。
           if (this.engine) this.engine.warmupDone = false;
@@ -470,13 +515,25 @@ export class Runner {
     return true;
   }
 
-  /** 同一状态连续输出会淹没日志，因此按次数节流。 */
-  logThrottled(msg) {
-    this.counters.logThrottle += 1;
-    const n = this.counters.logThrottle;
-    if (n === 1 || n % 20 === 0) {
-      this.logger?.info(`${msg}${n > 1 ? `（同类第 ${n} 次）` : ''}`);
+  /**
+   * 同一状态连续输出会淹没日志，因此按 **key** 做时间节流：每个 key 每 logThrottleMs 最多一条。
+   *
+   * key 必须能区分"谁在说话"（例如桶 id）。全局共用一个计数会让排在后面的桶
+   * 永远轮不到输出 —— 日志看起来就像只有一个类别在工作。
+   *
+   * 兼容旧写法：只传一个参数时，用它自己当 key。
+   */
+  logThrottled(key, msg) {
+    if (msg === undefined) {
+      msg = key;
+      key = msg;
     }
+    const now = this.now();
+    if (now - (this.throttleAt.get(key) ?? -Infinity) < this.logThrottleMs) return false;
+    this.throttleAt.set(key, now);
+    this.counters.logThrottle += 1;
+    this.logger?.info(msg);
+    return true;
   }
 }
 

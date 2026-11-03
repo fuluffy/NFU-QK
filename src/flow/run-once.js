@@ -155,7 +155,7 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
         );
       }
       await new Promise((r) => setTimeout(r, 20_000));
-      return true; // 继续循环，不要停
+      return 'waiting'; // 继续循环，不要停 —— 但别宣称"已恢复"
     }
     try {
       const fresh = await readJsonFile(sessionFile);
@@ -163,10 +163,10 @@ export async function runOnce({ config, profile, live, logger, root, signal, for
       lastSessionStamp = stamp;
       sessionWaitTicks = 0;
       logger.info(`已热加载新会话（${n} 个 Cookie），继续抢课`);
-      return true;
+      return 'fresh';
     } catch (e) {
       logger.warn(`新会话文件读取失败（${e.message}），稍后重试`);
-      return true;
+      return 'waiting';
     }
   };
 

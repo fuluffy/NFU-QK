@@ -156,3 +156,68 @@ test('未配置 buckets 时完全走旧的单桶路径', async () => {
   assert.equal(polled, true);
   assert.equal(runner.buckets.length, 0);
 });
+
+/**
+ * 事故现场：日志里只反复出现「绿色文明 未匹配到候选」，用户以为"别的类别没在跑"。
+ * 实际四个桶每轮都在查，只是节流用了全局计数，后三个桶的消息被吃掉了。
+ */
+test('所有类别都要出现在同一行汇总里，不能只报第一个桶', async () => {
+  const lines = [];
+  const engine = {
+    dryRun: false,
+    async pollBuckets(ctx, groups) {
+      return {
+        status: 'ok',
+        count: 0,
+        results: groups.map((g) => ({ bucketId: g.id, status: 'no-match', count: 0 })),
+      };
+    },
+    async attempt() {
+      throw new Error('不该提交');
+    },
+  };
+  const store = new TargetStore({ targets: [T.A1, T.A2, T.B1], now: () => 0 });
+  const runner = new Runner({
+    engine,
+    store,
+    clock: { serverNow: () => 0 },
+    buckets: [
+      { id: 'green', label: '绿色文明', needCredits: 2, targets: ['A1', 'A2'] },
+      { id: 'innov', label: '创新创业', needCredits: 2, targets: ['B1'] },
+      { id: 'art', label: '艺术审美', needCredits: 2, targets: ['A1'] },
+      { id: 'soc', label: '社会认知', needCredits: 1, targets: ['B1'] },
+    ],
+    now: () => 0,
+    sleep: async () => {},
+    logger: { info: (m) => lines.push(m), warn: (m) => lines.push(m), debug: () => {}, error: () => {} },
+    safety: { maxSubmitsPerMinute: 600 },
+  });
+
+  await runner.cycle({});
+
+  const summary = lines.find((l) => l.includes('本轮列表'));
+  assert.ok(summary, '应当输出一行本轮汇总');
+  for (const label of ['绿色文明', '创新创业', '艺术审美', '社会认知']) {
+    assert.ok(summary.includes(label), `汇总里缺少「${label}」：${summary}`);
+  }
+  assert.ok(summary.includes('0 条'), '汇总要带上列表条数');
+});
+
+test('节流按消息 key 独立计时，不同类别互不挤占', async () => {
+  const lines = [];
+  const logger = { info: (m) => lines.push(m), warn: () => {}, debug: () => {}, error: () => {} };
+  const runner = new Runner({
+    engine: { dryRun: true },
+    store: new TargetStore({ targets: [], now: () => 0 }),
+    clock: { serverNow: () => 0 },
+    now: () => 0,
+    sleep: async () => {},
+    logger,
+  });
+
+  runner.logThrottled('k1', '甲');
+  runner.logThrottled('k2', '乙');
+  runner.logThrottled('k1', '甲又来了'); // 同一 key，时间没走，应被吃掉
+
+  assert.deepEqual(lines, ['甲', '乙']);
+});
