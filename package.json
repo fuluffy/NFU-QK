@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "南京林业大学自动选课代理 — 配置驱动的选课流水线引擎（公选课 / 体育专项课）",
+  "description": "南京林业大学教务系统自动选课工具 — 配置驱动的选课流水线引擎（通识选修课）",
   "engines": {
     "node": ">=20"
   },

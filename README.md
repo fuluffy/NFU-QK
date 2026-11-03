@@ -104,8 +104,8 @@ node src/cli.js ui                  # 图形界面（等同于双击 .cmd）
 node src/cli.js doctor              # 环境自检
 node src/cli.js login               # 登录（保存会话）
 node src/cli.js rounds              # 发现当期选课轮次
-node src/cli.js check --config config.ggxxk.json   # 只读体检：能抢/满员/没排课
-node src/cli.js run   --config config.ggxxk.json   # 干跑（查询+匹配，不提交）
+node src/cli.js check --config config.json   # 只读体检：能抢/满员/没排课（config.json 由界面「保存配置」生成）
+node src/cli.js run   --config config.json   # 干跑（查询+匹配，不提交）
 node src/cli.js run   --live        # 实跑（真的会选课！先干跑确认过再用）
 node src/cli.js catalog --import 课表.xlsx          # 导入课程表
 node src/cli.js simulate --scenario open-later --live   # 本地演练，不碰学校服务器
